@@ -22,7 +22,9 @@
       "Bash(xargs:*)",
       "Bash(tree:*)",
       "Bash(npx lenz generate:*)",
-      "Bash(tsc:*)"
+      "Bash(tsc:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
