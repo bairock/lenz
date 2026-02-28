@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run build)",
+      "Bash(npm run docker:up:*)",
+      "Bash(npm test)",
+      "Bash(npm start)",
+      "Bash(docker-compose ps:*)",
+      "Bash(npm run test:integration:*)",
+      "Bash(npm run lenz:generate:*)",
+      "Bash(grep:*)",
+      "Bash(npx ts-node:*)",
+      "Bash(npx jest:*)",
+      "Bash(npx tsc:*)",
+      "Bash(node:*)",
+      "Bash(npm test:*)",
+      "Bash(npm run generate)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(xargs:*)",
+      "Bash(tree:*)",
+      "Bash(npx lenz generate:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
