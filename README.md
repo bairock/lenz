@@ -1,13 +1,13 @@
 # Lenz 🚀
 
-GraphQL-based ORM for MongoDB (Prisma 7.0 style)
+GraphQL-based ORM for MongoDB (Prisma style)
 
 ## Features
 
 - ✅ **GraphQL SDL Schema** - Define models using GraphQL syntax
 - ✅ **TypeScript First** - Full type safety and autocompletion
 - ✅ **MongoDB Native** - Leverage all MongoDB features
-- ✅ **Prisma 7.0 Style** - Familiar configuration and client generation
+- ✅ **Prisma Style** - Familiar configuration and client generation
 - ✅ **Auto-generated Client** - Generate TypeScript client from GraphQL schema
 - ✅ **Relations Support** - One-to-One, One-to-Many, Many-to-Many
 - ✅ **Transactions** - ACID transactions with MongoDB
