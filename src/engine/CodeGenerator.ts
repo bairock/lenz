@@ -437,6 +437,11 @@ ${models.map(model => `    this.${this.toCamelCase(model.name)} = new ${model.na
     const models = ${JSON.stringify(this.getModelsForRuntime(models), null, 2)}
 
     for (const model of models) {
+      // Skip embedded models with empty collection names
+      if (!model.collectionName) {
+        continue
+      }
+
       const collections = await this.db.listCollections({ name: model.collectionName }).toArray()
 
       if (collections.length === 0) {
@@ -930,11 +935,22 @@ export class QueryBuilder {
 
     for (const [key, value] of Object.entries(where || {})) {
       if (key === 'id') {
-        filter._id = this.normalizeId(value)
+        if (typeof value === 'object' && value !== null) {
+          // Для операторов типа { in: [...] } используем _id
+          this.applyOperators(filter, '_id', value)
+        } else {
+          filter._id = this.normalizeId(value)
+        }
       } else if (typeof value === 'object' && value !== null) {
         this.applyOperators(filter, key, value)
       } else {
-        filter[key] = value
+        // Нормализуем значения для полей, заканчивающихся на Id или Ids
+        const lowerKey = key.toLowerCase()
+        if (lowerKey.endsWith('id') || lowerKey.endsWith('ids')) {
+          filter[key] = this.normalizeId(value)
+        } else {
+          filter[key] = value
+        }
       }
     }
 
@@ -1079,15 +1095,20 @@ export class QueryBuilder {
           filter[field] = { $regex: \`\${value}\$\`, $options: 'i' }
         } else {
           if (!filter[field]) filter[field] = {}
-          filter[field][mongoOp] = value
+          // Нормализуем ID для операторов сравнения
+          const normalizedValue = this.normalizeId(value)
+          filter[field][mongoOp] = normalizedValue
         }
       }
     }
   }
 
-  static normalizeId(id: string | ObjectId): ObjectId | string {
+  static normalizeId(id: string | ObjectId | (string | ObjectId)[]): ObjectId | string | (ObjectId | string)[] {
     try {
-      if (typeof id === 'string' && /^[0-9a-fA-F]{24}\$/.test(id)) {
+      if (Array.isArray(id)) {
+        return id.map(item => this.normalizeId(item) as ObjectId | string)
+      }
+      if (typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)) {
         return new ObjectId(id)
       }
       return id
@@ -1604,8 +1625,12 @@ export class ${model.name}Delegate {
 
   private async includeRelations(document: any, include: any): Promise<any> {
     const result = { ...document }
+    if (!include || typeof include !== 'object') {
+      return result
+    }
 
-    // TODO: Implement relation inclusion
+    ${this.generateRelationInclusionCode(model)}
+
     return result
   }
 
@@ -1623,6 +1648,58 @@ export class ${model.name}Delegate {
   }
 }
 `;
+  }
+
+  private generateRelationInclusionCode(model: GraphQLModel): string {
+    const lines: string[] = [];
+
+    for (const relation of model.relations) {
+      switch (relation.type) {
+        case 'oneToMany':
+          lines.push(`    // Relation: ${relation.field} (oneToMany)`)
+          lines.push(`    if (include.${relation.field} !== undefined) {`)
+          lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findMany({`)
+          lines.push(`        where: { ${relation.foreignKey}: document.id },`)
+          lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`)
+          lines.push(`      })`)
+          lines.push(`      result.${relation.field} = ${relation.field}`)
+          lines.push(`    }`)
+          break;
+        case 'manyToOne':
+          lines.push(`    // Relation: ${relation.field} (manyToOne)`)
+          lines.push(`    if (include.${relation.field} !== undefined && document.${relation.foreignKey}) {`)
+          lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findUnique({`)
+          lines.push(`        where: { id: document.${relation.foreignKey} },`)
+          lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`)
+          lines.push(`      })`)
+          lines.push(`      result.${relation.field} = ${relation.field}`)
+          lines.push(`    }`)
+          break;
+        case 'oneToOne':
+          lines.push(`    // Relation: ${relation.field} (oneToOne)`)
+          lines.push(`    if (include.${relation.field} !== undefined) {`)
+          lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findFirst({`)
+          lines.push(`        where: { ${relation.foreignKey}: document.id },`)
+          lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`)
+          lines.push(`      })`)
+          lines.push(`      result.${relation.field} = ${relation.field}`)
+          lines.push(`    }`)
+          break;
+        case 'manyToMany':
+          lines.push(`    // Relation: ${relation.field} (manyToMany) - TODO: implement manyToMany relation loading`)
+          lines.push(`    if (include.${relation.field} !== undefined) {`)
+          lines.push(`      console.warn('manyToMany relation loading not yet implemented for ${relation.field}')`)
+          lines.push(`      result.${relation.field} = []`)
+          lines.push(`    }`)
+          break;
+      }
+    }
+
+    if (lines.length === 0) {
+      return '';
+    }
+
+    return lines.join('\n');
   }
 
   private toCamelCase(str: string): string {
