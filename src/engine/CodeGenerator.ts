@@ -944,13 +944,9 @@ export class QueryBuilder {
       } else if (typeof value === 'object' && value !== null) {
         this.applyOperators(filter, key, value)
       } else {
-        // Нормализуем значения для полей, заканчивающихся на Id или Ids
-        const lowerKey = key.toLowerCase()
-        if (lowerKey.endsWith('id') || lowerKey.endsWith('ids')) {
-          filter[key] = this.normalizeId(value)
-        } else {
-          filter[key] = value
-        }
+        // Оставляем значение как есть для внешних ключей
+        // (внешние ключи хранятся как строки, не преобразуем в ObjectId)
+        filter[key] = value
       }
     }
 
@@ -1095,8 +1091,9 @@ export class QueryBuilder {
           filter[field] = { $regex: \`\${value}\$\`, $options: 'i' }
         } else {
           if (!filter[field]) filter[field] = {}
-          // Нормализуем ID для операторов сравнения
-          const normalizedValue = this.normalizeId(value)
+          // Нормализуем ID только для поля _id (внутренний идентификатор)
+          // Внешние ключи хранятся как строки, не преобразуем в ObjectId
+          const normalizedValue = field === '_id' ? this.normalizeId(value) : value
           filter[field][mongoOp] = normalizedValue
         }
       }
@@ -1358,11 +1355,12 @@ export class ${model.name}Delegate {
       { returnDocument: 'after' }
     )
 
-    if (!result.value) {
+    const updatedDoc = result.value || result
+    if (!updatedDoc) {
       throw new Error('Document not found')
     }
 
-    const formatted = RelationResolver.formatDocument(result.value)
+    const formatted = RelationResolver.formatDocument(updatedDoc)
 
     if (args.include) {
       return await this.includeRelations(formatted, args.include)
