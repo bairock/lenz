@@ -21,7 +21,8 @@
       "Bash(find:*)",
       "Bash(xargs:*)",
       "Bash(tree:*)",
-      "Bash(npx lenz generate:*)"
+      "Bash(npx lenz generate:*)",
+      "Bash(tsc:*)"
     ],
     "deny": [],
     "ask": []

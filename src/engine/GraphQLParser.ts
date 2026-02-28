@@ -14,7 +14,7 @@ export interface GraphQLField {
   isHidden: boolean;
   relationType?: 'oneToOne' | 'oneToMany' | 'manyToOne' | 'manyToMany';
   relationTo?: string;
-  foreignKey?: string;
+  foreignKey: string | undefined;
   directives: string[];
   defaultValue?: any;
 }
@@ -135,7 +135,8 @@ export class GraphQLParser {
             isRelation,
             isHidden: fieldDirectives.includes('hide'),
             directives: fieldDirectives,
-            defaultValue: this.getDefaultValue(fieldDirectives, field)
+            defaultValue: this.getDefaultValue(fieldDirectives, field),
+            foreignKey: this.getRelationField(fieldDirectives, field)
           };
 
           fields.push(graphQLField);
@@ -234,6 +235,30 @@ export class GraphQLParser {
     return undefined;
   }
 
+  private getRelationField(directives: string[], fieldNode?: FieldDefinitionNode): string | undefined {
+    // Пробуем извлечь значение из AST узла директивы
+    if (fieldNode?.directives) {
+      const relationDirective = fieldNode.directives.find(d => d.name.value === 'relation');
+      if (relationDirective?.arguments) {
+        const fieldArg = relationDirective.arguments.find(arg => arg.name.value === 'field');
+        if (fieldArg?.value.kind === 'StringValue') {
+          return fieldArg.value.value;
+        }
+      }
+    }
+
+    // Fallback для обратной совместимости (старый способ через регулярное выражение)
+    const relationDirective = directives.find(d => d.startsWith('relation'));
+    if (relationDirective) {
+      // Извлекаем значение из директивы @relation(field: "...")
+      const match = relationDirective.match(/relation\(field:\s*"([^"]+)"\)/);
+      if (match) {
+        return match[1];
+      }
+    }
+    return undefined;
+  }
+
   private analyzeRelationships(): void {
     for (const [modelName, model] of this.models) {
       // Пропускаем embedded модели для анализа отношений
@@ -263,39 +288,53 @@ export class GraphQLParser {
       f.isRelation && f.type === modelName
     );
 
-    if (field.isArray) {
-      if (reverseField?.isArray) {
-        return {
-          type: 'manyToMany',
-          field: field.name,
-          target: field.type,
-          joinCollection: `${modelName.toLowerCase()}_${field.type.toLowerCase()}`
-        };
-      } else {
-        return {
-          type: 'oneToMany',
-          field: field.name,
-          target: field.type,
-          foreignKey: `${modelName.toLowerCase()}Id`
-        };
-      }
-    } else {
-      if (reverseField?.isArray) {
-        return {
-          type: 'manyToOne',
-          field: field.name,
-          target: field.type,
-          foreignKey: `${targetModel.name.toLowerCase()}Id`
-        };
-      } else {
-        return {
-          type: 'oneToOne',
-          field: field.name,
-          target: field.type,
-          foreignKey: `${modelName.toLowerCase()}Id`
-        };
+    // Определяем тип отношения
+    const isManyToMany = field.isArray && reverseField?.isArray;
+    const isOneToMany = field.isArray && !reverseField?.isArray;
+    const isManyToOne = !field.isArray && reverseField?.isArray;
+    const isOneToOne = !field.isArray && !reverseField?.isArray;
+
+    // Определяем foreign key: используем значение из директивы @relation(field: "...") если задано,
+    // иначе генерируем автоматически по правилам Lenz
+    let foreignKey: string | undefined = field.foreignKey;
+    if (!foreignKey && !isManyToMany) {
+      // Автоматическая генерация по типу отношения
+      if (isOneToMany) {
+        // oneToMany: foreign key находится в целевой модели, ссылается на текущую модель
+        foreignKey = `${modelName.toLowerCase()}Id`;
+      } else if (isManyToOne) {
+        // manyToOne: foreign key находится в текущей модели, ссылается на целевую модель
+        foreignKey = `${targetModel.name.toLowerCase()}Id`;
+      } else if (isOneToOne) {
+        // oneToOne: foreign key находится в целевой модели, ссылается на текущую модель
+        foreignKey = `${modelName.toLowerCase()}Id`;
       }
     }
+
+    // Для manyToMany foreignKey не нужен
+    if (isManyToMany) {
+      return {
+        type: 'manyToMany',
+        field: field.name,
+        target: field.type,
+        joinCollection: `${modelName.toLowerCase()}_${field.type.toLowerCase()}`
+      };
+    }
+
+    // Для остальных типов foreignKey должен быть определен
+    if (!foreignKey) {
+      // Это не должно происходить, но на всякий случай генерируем
+      foreignKey = `${modelName.toLowerCase()}Id`;
+    }
+
+    const relation: ModelRelation = {
+      type: isOneToMany ? 'oneToMany' : isManyToOne ? 'manyToOne' : 'oneToOne',
+      field: field.name,
+      target: field.type,
+      foreignKey
+    };
+
+    return relation;
   }
 
   private toCollectionName(modelName: string): string {
