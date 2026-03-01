@@ -24,7 +24,8 @@
       "Bash(npx lenz generate:*)",
       "Bash(tsc:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(del:*)"
     ],
     "deny": [],
     "ask": []

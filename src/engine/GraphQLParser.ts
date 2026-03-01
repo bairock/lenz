@@ -1,6 +1,6 @@
 import { parse, DocumentNode, ObjectTypeDefinitionNode, TypeNode, EnumTypeDefinitionNode, FieldDefinitionNode } from 'graphql';
 import { SchemaValidator } from './SchemaValidator';
-import { SchemaParseError } from '../errors';
+import { SchemaParseError, RelationValidationError } from '../errors';
 import { lenzDirectives } from './directives';
 
 export interface GraphQLField {
@@ -280,6 +280,14 @@ export class GraphQLParser {
     }
   }
 
+  private getJoinCollectionName(model1: string, model2: string): string {
+    // Сортируем имена моделей лексикографически для консистентности
+    const [first, second] = [model1.toLowerCase(), model2.toLowerCase()].sort();
+    return `${first}_${second}`;
+  }
+
+
+
   private determineRelationType(modelName: string, field: GraphQLField): ModelRelation | null {
     const targetModel = this.models.get(field.type);
     if (!targetModel) return null;
@@ -287,6 +295,26 @@ export class GraphQLParser {
     const reverseField = targetModel.fields.find(f =>
       f.isRelation && f.type === modelName
     );
+
+    // Если это отношение, но обратное поле не найдено, выбрасываем ошибку
+    if (field.isRelation && !reverseField) {
+      // Определяем возможный тип связи на основе текущего поля
+      let suggestion = '';
+      if (field.isArray) {
+        if (field.foreignKey && field.foreignKey.endsWith('Ids')) {
+          suggestion = `Это похоже на many-to-many отношение. Добавьте в модель '${field.type}' поле: ${modelName.toLowerCase()}s: [${modelName}!]! @relation(field: "${field.foreignKey}")`;
+        } else {
+          suggestion = `Это может быть one-to-many отношение. Добавьте в модель '${field.type}' поле: ${modelName.toLowerCase()}: ${modelName}! @relation(field: "${field.name}Id")`;
+        }
+      } else {
+        suggestion = `Это может быть many-to-one или one-to-one отношение. Добавьте в модель '${field.type}' поле: ${modelName.toLowerCase()}s: [${modelName}!]! для one-to-many или ${modelName.toLowerCase()}: ${modelName}! для one-to-one`;
+      }
+
+      throw new RelationValidationError(
+        `Неполная связь: поле '${field.name}' в модели '${modelName}' ссылается на модель '${field.type}', но обратная связь не определена. ${suggestion}`,
+        { modelName, field: field.name, targetModel: field.type }
+      );
+    }
 
     // Определяем тип отношения
     const isManyToMany = field.isArray && reverseField?.isArray;
@@ -311,13 +339,14 @@ export class GraphQLParser {
       }
     }
 
+
     // Для manyToMany foreignKey не нужен
     if (isManyToMany) {
       return {
         type: 'manyToMany',
         field: field.name,
         target: field.type,
-        joinCollection: `${modelName.toLowerCase()}_${field.type.toLowerCase()}`
+        joinCollection: this.getJoinCollectionName(modelName, field.type)
       };
     }
 
@@ -383,7 +412,7 @@ export class GraphQLParser {
       this.getRelations()
     );
     validator.validate({
-      validateRelations: false,  // Temporarily disabled due to model reference issues
+      validateRelations: true,
       checkCircularDependencies: false  // Disabled because circular dependencies are allowed in relationships
     });
 

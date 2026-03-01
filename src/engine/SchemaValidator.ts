@@ -219,12 +219,15 @@ export class SchemaValidator {
    */
   private validateRelations(): void {
     for (const relation of this.relations) {
-      const sourceModel = this.models.find(m => m.name === relation.field);
+      // Find source model that contains this relation
+      const sourceModel = this.models.find(m =>
+        m.relations.some(r => r.field === relation.field && r.target === relation.target)
+      );
       const targetModel = this.models.find(m => m.name === relation.target);
 
       if (!sourceModel) {
         throw new RelationValidationError(
-          `Source model '${relation.field}' not found for relation`,
+          `Source model for relation '${relation.field}' -> '${relation.target}' not found`,
           { relation }
         );
       }
@@ -249,6 +252,7 @@ export class SchemaValidator {
           );
         }
       }
+
     }
   }
 
