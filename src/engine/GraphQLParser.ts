@@ -1,6 +1,6 @@
 import { parse, DocumentNode, ObjectTypeDefinitionNode, TypeNode, EnumTypeDefinitionNode, FieldDefinitionNode } from 'graphql';
 import { SchemaValidator } from './SchemaValidator';
-import { SchemaParseError, RelationValidationError } from '../errors';
+import { SchemaParseError } from '../errors';
 import { lenzDirectives } from './directives';
 
 export interface GraphQLField {
@@ -17,6 +17,8 @@ export interface GraphQLField {
   foreignKey: string | undefined;
   directives: string[];
   defaultValue?: any;
+  relationStrategy?: 'populate' | 'lookup';
+  relationIndex?: boolean;
 }
 
 export interface GraphQLModel {
@@ -32,9 +34,11 @@ export interface ModelRelation {
   type: 'oneToOne' | 'oneToMany' | 'manyToOne' | 'manyToMany';
   field: string;
   target: string;
-  foreignKey?: string;
-  foreignKeyLocation?: 'source' | 'target';
-  joinCollection?: string;
+  foreignKey: string | undefined;
+  foreignKeyLocation: 'source' | 'target' | undefined;
+  joinCollection: string | undefined;
+  strategy: 'populate' | 'lookup';
+  index: boolean;
 }
 
 export interface ModelIndex {
@@ -126,6 +130,7 @@ export class GraphQLParser {
 
           const isRelation = this.isModelType(fieldType.baseType);
 
+          const relationData = this.parseRelationDirective(field);
           const graphQLField: GraphQLField = {
             name: field.name.value,
             type: fieldType.baseType,
@@ -137,7 +142,9 @@ export class GraphQLParser {
             isHidden: fieldDirectives.includes('hide'),
             directives: fieldDirectives,
             defaultValue: this.getDefaultValue(fieldDirectives, field),
-            foreignKey: this.getRelationField(fieldDirectives, field)
+            foreignKey: relationData.field ?? this.getRelationField(fieldDirectives, field),
+            relationStrategy: relationData.strategy ?? 'populate',
+            relationIndex: relationData.index ?? true
           };
 
           fields.push(graphQLField);
@@ -196,6 +203,29 @@ export class GraphQLParser {
           };
       }
     }
+  }
+
+  private parseRelationDirective(fieldNode: FieldDefinitionNode): {
+    field?: string;
+    strategy?: 'populate' | 'lookup';
+    index?: boolean
+  } {
+    const result: { field?: string; strategy?: 'populate' | 'lookup'; index?: boolean } = {};
+    const relationDirective = fieldNode.directives?.find(d => d.name.value === 'relation');
+    if (relationDirective?.arguments) {
+      for (const arg of relationDirective.arguments) {
+        if (arg.name.value === 'field' && arg.value.kind === 'StringValue') {
+          result.field = arg.value.value;
+        } else if (arg.name.value === 'strategy' && arg.value.kind === 'StringValue') {
+          if (arg.value.value === 'populate' || arg.value.value === 'lookup') {
+            result.strategy = arg.value.value;
+          }
+        } else if (arg.name.value === 'index' && arg.value.kind === 'BooleanValue') {
+          result.index = arg.value.value;
+        }
+      }
+    }
+    return result;
   }
 
   private isModelType(typeName: string): boolean {
@@ -275,6 +305,21 @@ export class GraphQLParser {
           if (relation) {
             model.relations.push(relation);
             this.relations.push(relation);
+
+            // Add index for foreign key field if relation.index is true
+            if (relation.index && relation.foreignKey && relation.foreignKeyLocation === 'source') {
+              // Check if index already exists for this field
+              const existingIndex = model.indexes.find(idx =>
+                idx.fields.length === 1 && idx.fields[0] === relation.foreignKey
+              );
+              if (!existingIndex) {
+                model.indexes.push({
+                  fields: [relation.foreignKey],
+                  unique: false,
+                  sparse: relation.type === 'oneToOne' || relation.type === 'manyToOne' ? true : false
+                });
+              }
+            }
           }
         }
       }
@@ -293,68 +338,30 @@ export class GraphQLParser {
     const targetModel = this.models.get(field.type);
     if (!targetModel) return null;
 
-    const reverseField = targetModel.fields.find(f =>
-      f.isRelation && f.type === modelName
-    );
-
-    // Если это отношение, но обратное поле не найдено, выбрасываем ошибку
-    if (field.isRelation && !reverseField) {
-      // Определяем возможный тип связи на основе текущего поля
-      let suggestion = '';
-      if (field.isArray) {
-        if (field.foreignKey && field.foreignKey.endsWith('Ids')) {
-          suggestion = `Это похоже на many-to-many отношение. Добавьте в модель '${field.type}' поле: ${modelName.toLowerCase()}s: [${modelName}!]! @relation(field: "${field.foreignKey}")`;
-        } else {
-          suggestion = `Это может быть one-to-many отношение. Добавьте в модель '${field.type}' поле: ${modelName.toLowerCase()}: ${modelName}! @relation(field: "${field.name}Id")`;
-        }
-      } else {
-        suggestion = `Это может быть many-to-one или one-to-one отношение. Добавьте в модель '${field.type}' поле: ${modelName.toLowerCase()}s: [${modelName}!]! для one-to-many или ${modelName.toLowerCase()}: ${modelName}! для one-to-one`;
-      }
-
-      throw new RelationValidationError(
-        `Неполная связь: поле '${field.name}' в модели '${modelName}' ссылается на модель '${field.type}', но обратная связь не определена. ${suggestion}`,
-        { modelName, field: field.name, targetModel: field.type }
-      );
-    }
-
-    // Определяем тип отношения
-    const isManyToMany = field.isArray && reverseField?.isArray;
-    const isOneToMany = field.isArray && !reverseField?.isArray;
-    const isManyToOne = !field.isArray && reverseField?.isArray;
-    const isOneToOne = !field.isArray && !reverseField?.isArray;
-
-    // Определяем foreign key: используем значение из директивы @relation(field: "...") если задано,
-    // иначе генерируем автоматически по правилам Lenz
+    // Определяем тип отношения на основе структуры поля
+    let relationType: 'oneToMany' | 'manyToOne' | 'oneToOne' | 'manyToMany';
     let foreignKey: string | undefined = field.foreignKey;
-    if (!foreignKey && !isManyToMany) {
-      // Автоматическая генерация по типу отношения
-      if (isOneToMany) {
-        // oneToMany: foreign key находится в исходной модели как массив ID целевой модели
-        foreignKey = `${targetModel.name.toLowerCase()}Ids`;
-      } else if (isManyToOne) {
-        // manyToOne: foreign key находится в исходной модели как одиночный ID целевой модели
-        foreignKey = `${targetModel.name.toLowerCase()}Id`;
-      } else if (isOneToOne) {
-        // oneToOne: foreign key находится в исходной модели как одиночный ID целевой модели
-        foreignKey = `${targetModel.name.toLowerCase()}Id`;
+    let foreignKeyLocation: 'source' | 'target' = 'source';
+    let joinCollection: string | undefined = undefined;
+
+    if (field.isArray) {
+      // Массив может быть oneToMany или manyToMany
+      if (foreignKey && foreignKey.endsWith('Ids')) {
+        relationType = 'oneToMany';
+      } else {
+        // manyToMany отношение требует join-коллекции
+        relationType = 'manyToMany';
+        joinCollection = this.getJoinCollectionName(modelName, field.type);
+        foreignKey = undefined; // для manyToMany foreignKey не используется
       }
+    } else {
+      // Одиночное поле - manyToOne или oneToOne
+      relationType = foreignKey && foreignKey.endsWith('Id') ? 'manyToOne' : 'oneToOne';
     }
 
-
-    // Для manyToMany foreignKey не нужен
-    if (isManyToMany) {
-      return {
-        type: 'manyToMany',
-        field: field.name,
-        target: field.type,
-        joinCollection: this.getJoinCollectionName(modelName, field.type)
-      };
-    }
-
-    // Для остальных типов foreignKey должен быть определен
-    if (!foreignKey) {
-      // Это не должно происходить, но на всякий случай генерируем
-      if (isOneToMany) {
+    // Автоматическая генерация foreign key если не указан
+    if (!foreignKey && relationType !== 'manyToMany') {
+      if (relationType === 'oneToMany') {
         foreignKey = `${targetModel.name.toLowerCase()}Ids`;
       } else {
         // manyToOne или oneToOne
@@ -362,24 +369,26 @@ export class GraphQLParser {
       }
     }
 
-    // Determine foreign key location
-    // For all relation types except manyToMany, foreign key must be in source model
-    let foreignKeyLocation: 'source' | 'target' = 'source';
-
-    if (foreignKey) {
-      if (isManyToOne || isOneToOne || isOneToMany) {
-        // For manyToOne, oneToOne, and oneToMany: foreign key must be in source model
-        foreignKeyLocation = 'source';
-      }
-      // manyToMany doesn't have foreign key
+    // Автоматическое определение стратегии по умолчанию на основе типа отношения
+    let defaultStrategy: 'populate' | 'lookup' = 'populate';
+    if (relationType === 'oneToMany') {
+      // Двусторонние связи с массивами ID (например, Author.bookIds) используют lookup
+      defaultStrategy = 'lookup';
+    } else if (relationType === 'manyToMany') {
+      // manyToMany пока не поддерживает lookup (требует join-коллекции)
+      defaultStrategy = 'populate';
     }
+    // manyToOne и oneToOne используют populate по умолчанию
 
     const relation: ModelRelation = {
-      type: isOneToMany ? 'oneToMany' : isManyToOne ? 'manyToOne' : 'oneToOne',
+      type: relationType,
       field: field.name,
       target: field.type,
       foreignKey,
-      foreignKeyLocation
+      foreignKeyLocation,
+      joinCollection,
+      strategy: field.relationStrategy ?? defaultStrategy,
+      index: field.relationIndex ?? true
     };
 
     return relation;

@@ -1,4 +1,4 @@
-import { GraphQLDirective, DirectiveLocation, GraphQLString, GraphQLNonNull } from 'graphql';
+import { GraphQLDirective, DirectiveLocation, GraphQLString, GraphQLNonNull, GraphQLBoolean } from 'graphql';
 
 // Определение всех директив Lenz ORM
 export const modelDirective = new GraphQLDirective({
@@ -44,6 +44,14 @@ export const relationDirective = new GraphQLDirective({
     field: {
       type: new GraphQLNonNull(GraphQLString),
       description: 'The field that stores the foreign key'
+    },
+    strategy: {
+      type: GraphQLString,
+      description: 'Strategy for loading related data: "populate" (default) or "lookup"'
+    },
+    index: {
+      type: GraphQLBoolean,
+      description: 'Whether to create an index on the foreign key field (default: true)'
     }
   },
   description: 'Defines a relationship between models'

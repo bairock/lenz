@@ -1250,9 +1250,9 @@ export class ${model.name}Delegate {
   private readonly hiddenFields: string[] = ${JSON.stringify(model.fields.filter(f => f.isHidden).map(f => f.name))};
 
   private readonly defaultValues = {
-    ${model.fields.filter(f => f.isArray && f.isRequired && f.defaultValue === undefined).map(f => `${f.name}: []`).join(',\n    ')}
-    ${model.fields.filter(f => f.defaultValue !== undefined).map(f => `${f.name}: ${JSON.stringify(f.defaultValue)}`).join(',\n    ')}
+    ${model.fields.filter(f => f.defaultValue !== undefined || (f.isRequired && f.isArray && !f.isId)).map(f => `${f.name}: ${JSON.stringify(f.defaultValue !== undefined ? f.defaultValue : [])}`).join(',\n    ')}
   };
+
 
   private get collection(): Collection<Document> {
     return this.client.$db.collection('${model.collectionName}')
@@ -1350,6 +1350,7 @@ export class ${model.name}Delegate {
 
   async update(args: ${model.name}UpdateArgs): Promise<${model.name}> {
     const query = QueryBuilder.buildWhere(args.where)
+
     const updateData = {
       ...args.data,
       updatedAt: new Date()
@@ -1659,54 +1660,100 @@ export class ${model.name}Delegate {
     const lines: string[] = [];
 
     for (const relation of model.relations) {
-      switch (relation.type) {
-        case 'oneToMany':
-          lines.push(`    // Relation: ${relation.field} (oneToMany)`)
-          lines.push(`    if (include.${relation.field} !== undefined) {`)
-          // Check foreign key location: if in source, document has array of IDs; if in target, target has foreign key
-          if (relation.foreignKeyLocation === 'source') {
-            // Foreign key is array of IDs in source document
-            lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findMany({`)
-            lines.push(`        where: { id: { in: document.${relation.foreignKey} } },`)
-            lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`)
-            lines.push(`      })`)
-          } else {
-            // Foreign key is single ID in target documents (default)
-            lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findMany({`)
-            lines.push(`        where: { ${relation.foreignKey}: document.id },`)
-            lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`)
-            lines.push(`      })`)
+      if (relation.strategy === 'lookup') {
+        // Generate lookup (aggregation) based code
+        lines.push(`    // Relation: ${relation.field} (${relation.type}) - lookup strategy`);
+        lines.push(`    if (include.${relation.field} !== undefined) {`);
+
+        // Determine local field (foreign key in source document)
+        const localField = relation.foreignKey;
+        if (!localField) {
+          // manyToMany case - TODO: implement join collection lookup
+          lines.push(`      console.warn('lookup strategy not implemented for manyToMany relation ${relation.field}')`);
+          lines.push(`      result.${relation.field} = []`);
+        } else {
+          // Build aggregation pipeline
+          lines.push(`      const pipeline = [`);
+          lines.push(`        { $match: { _id: document._id } },`);
+          lines.push(`        { $lookup: {`);
+          lines.push(`          from: '${this.toCollectionName(relation.target)}',`);
+          lines.push(`          localField: '${localField}',`);
+          lines.push(`          foreignField: '_id',`);
+          lines.push(`          as: '${relation.field}_lookup'`);
+          lines.push(`        } }`);
+
+          // Add unwind for single relations (oneToOne, manyToOne)
+          const needUnwind = relation.type === 'oneToOne' || relation.type === 'manyToOne';
+          if (needUnwind) {
+            lines.push(`        ,{ $unwind: { path: '$${relation.field}_lookup', preserveNullAndEmptyArrays: true } }`);
           }
-          lines.push(`      result.${relation.field} = ${relation.field}`)
-          lines.push(`    }`)
-          break;
-        case 'manyToOne':
-          lines.push(`    // Relation: ${relation.field} (manyToOne)`)
-          lines.push(`    if (include.${relation.field} !== undefined && document.${relation.foreignKey}) {`)
-          lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findUnique({`)
-          lines.push(`        where: { id: document.${relation.foreignKey} },`)
-          lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`)
-          lines.push(`      })`)
-          lines.push(`      result.${relation.field} = ${relation.field}`)
-          lines.push(`    }`)
-          break;
-        case 'oneToOne':
-          lines.push(`    // Relation: ${relation.field} (oneToOne)`)
-          lines.push(`    if (include.${relation.field} !== undefined && document.${relation.foreignKey}) {`)
-          lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findUnique({`)
-          lines.push(`        where: { id: document.${relation.foreignKey} },`)
-          lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`)
-          lines.push(`      })`)
-          lines.push(`      result.${relation.field} = ${relation.field}`)
-          lines.push(`    }`)
-          break;
-        case 'manyToMany':
-          lines.push(`    // Relation: ${relation.field} (manyToMany) - TODO: implement manyToMany relation loading`)
-          lines.push(`    if (include.${relation.field} !== undefined) {`)
-          lines.push(`      console.warn('manyToMany relation loading not yet implemented for ${relation.field}')`)
-          lines.push(`      result.${relation.field} = []`)
-          lines.push(`    }`)
-          break;
+
+          lines.push(`      ]`);
+          lines.push(`      const aggResult = await this.collection.aggregate(pipeline).toArray()`);
+          lines.push(`      if (aggResult.length > 0) {`);
+          lines.push(`        result.${relation.field} = aggResult[0].${relation.field}_lookup`);
+          // Handle nested include? (TODO)
+          lines.push(`      } else {`);
+          lines.push(`        result.${relation.field} = ${needUnwind ? 'null' : '[]'}`);
+          lines.push(`      }`);
+        }
+        lines.push(`    }`);
+      } else {
+        // Populate strategy (separate queries)
+        switch (relation.type) {
+          case 'oneToMany':
+            lines.push(`    // Relation: ${relation.field} (oneToMany) - populate strategy`);
+            lines.push(`    if (include.${relation.field} !== undefined) {`);
+            // Check foreign key location: if in source, document has array of IDs; if in target, target has foreign key
+            if (relation.foreignKeyLocation === 'source') {
+              // Foreign key is array of IDs in source document
+              lines.push(`      if (document.${relation.foreignKey} && Array.isArray(document.${relation.foreignKey})) {`);
+              lines.push(`        const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findMany({`);
+              lines.push(`          where: { id: { in: document.${relation.foreignKey} } },`);
+              lines.push(`          include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`);
+              lines.push(`        })`);
+              lines.push(`        result.${relation.field} = ${relation.field}`);
+              lines.push(`      } else {`);
+              lines.push(`        result.${relation.field} = []`);
+              lines.push(`      }`);
+            } else {
+              // Foreign key is single ID in target documents (default)
+              lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findMany({`);
+              lines.push(`        where: { ${relation.foreignKey}: document.id },`);
+              lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`);
+              lines.push(`      })`);
+              lines.push(`      result.${relation.field} = ${relation.field}`);
+            }
+            lines.push(`    }`);
+            break;
+          case 'manyToOne':
+            lines.push(`    // Relation: ${relation.field} (manyToOne) - populate strategy`);
+            lines.push(`    if (include.${relation.field} !== undefined && document.${relation.foreignKey}) {`);
+            lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findUnique({`);
+            lines.push(`        where: { id: document.${relation.foreignKey} },`);
+            lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`);
+            lines.push(`      })`);
+            lines.push(`      result.${relation.field} = ${relation.field}`);
+            lines.push(`    }`);
+            break;
+          case 'oneToOne':
+            lines.push(`    // Relation: ${relation.field} (oneToOne) - populate strategy`);
+            lines.push(`    if (include.${relation.field} !== undefined && document.${relation.foreignKey}) {`);
+            lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findUnique({`);
+            lines.push(`        where: { id: document.${relation.foreignKey} },`);
+            lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`);
+            lines.push(`      })`);
+            lines.push(`      result.${relation.field} = ${relation.field}`);
+            lines.push(`    }`);
+            break;
+          case 'manyToMany':
+            lines.push(`    // Relation: ${relation.field} (manyToMany) - TODO: implement manyToMany relation loading`);
+            lines.push(`    if (include.${relation.field} !== undefined) {`);
+            lines.push(`      console.warn('manyToMany relation loading not yet implemented for ${relation.field}')`);
+            lines.push(`      result.${relation.field} = []`);
+            lines.push(`    }`);
+            break;
+        }
       }
     }
 
@@ -1719,6 +1766,10 @@ export class ${model.name}Delegate {
 
   private toCamelCase(str: string): string {
     return str.charAt(0).toLowerCase() + str.slice(1);
+  }
+
+  private toCollectionName(modelName: string): string {
+    return modelName.toLowerCase() + 's';
   }
 }
 

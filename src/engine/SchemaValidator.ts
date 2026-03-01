@@ -70,6 +70,7 @@ export class SchemaValidator {
 
     if (validateRelations) {
       this.validateRelations();
+      this.validateRelationStrategies();
     }
 
     if (checkCircularDependencies) {
@@ -441,6 +442,51 @@ export class SchemaValidator {
           );
         }
         seen.add(value);
+      }
+    }
+  }
+
+  /**
+   * Validate relation strategies and indexes
+   */
+  private validateRelationStrategies(): void {
+    for (const relation of this.relations) {
+      // Validate strategy
+      if (relation.strategy !== 'populate' && relation.strategy !== 'lookup') {
+        throw new SchemaValidationError(
+          `Invalid relation strategy '${relation.strategy}' for relation '${relation.field}' -> '${relation.target}'. ` +
+          `Must be either 'populate' or 'lookup'.`
+        );
+      }
+
+      // Validate index boolean
+      if (typeof relation.index !== 'boolean') {
+        throw new SchemaValidationError(
+          `Invalid index value '${relation.index}' for relation '${relation.field}' -> '${relation.target}'. ` +
+          `Must be a boolean.`
+        );
+      }
+
+      // Validate lookup strategy requirements
+      if (relation.strategy === 'lookup') {
+        if (relation.type === 'manyToMany') {
+          console.warn(
+            `⚠️  Lookup strategy is not yet implemented for manyToMany relation '${relation.field}' -> '${relation.target}'. ` +
+            `Will fallback to populate.`
+          );
+        } else if (!relation.foreignKey) {
+          // For other relation types (oneToMany, manyToOne, oneToOne), foreign key is required
+          throw new SchemaValidationError(
+            `Lookup strategy requires a foreign key field for relation '${relation.field}' -> '${relation.target}'. ` +
+            `Add @relation(field: "...") directive with a foreign key field.`
+          );
+        }
+
+        // Warn about manual array synchronization requirement
+        console.warn(
+          `⚠️  Lookup strategy selected for relation '${relation.field}' -> '${relation.target}'. ` +
+          `Note: You must manually synchronize ID arrays (e.g., ${relation.foreignKey}) when creating/updating/deleting related documents.`
+        );
       }
     }
   }
