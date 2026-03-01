@@ -241,15 +241,102 @@ export class SchemaValidator {
 
       // Check if foreign key field exists for certain relation types
       if (relation.foreignKey) {
-        const hasForeignKey = targetModel.fields.some(f =>
+        // For oneToMany, foreign key must be in source (array of IDs)
+        // For manyToOne and oneToOne, foreign key must be in source (single ID)
+        let modelWithForeignKey: GraphQLModel | undefined;
+        let fieldInSource = sourceModel.fields.find(f =>
           f.name === relation.foreignKey || f.name === `${relation.foreignKey}Id`
         );
 
-        if (!hasForeignKey) {
+        // Always check source model for all relation types
+        if (fieldInSource) {
+          modelWithForeignKey = sourceModel;
+        }
+
+        if (!modelWithForeignKey) {
           throw new RelationValidationError(
-            `Foreign key field '${relation.foreignKey}' not found in target model '${relation.target}'`,
+            `Foreign key field '${relation.foreignKey}' not found in source model '${sourceModel.name}'`,
             { relation }
           );
+        }
+
+        // Validate field type
+        if (fieldInSource) {
+          if (relation.type === 'oneToMany') {
+            // For oneToMany: foreign key must be array of IDs in source
+            if (!fieldInSource.isArray || fieldInSource.type !== 'ID') {
+              throw new RelationValidationError(
+                `Foreign key field '${relation.foreignKey}' in source model '${sourceModel.name}' must be an array of IDs (type: [ID!]!) for one-to-many relation`,
+                { relation }
+              );
+            }
+          } else if (relation.type === 'manyToOne' || relation.type === 'oneToOne') {
+            // For manyToOne and oneToOne: foreign key must be single ID in source
+            if (fieldInSource.isArray || fieldInSource.type !== 'ID') {
+              throw new RelationValidationError(
+                `Foreign key field '${relation.foreignKey}' in source model '${sourceModel.name}' must be a single ID (type: ID!) for ${relation.type} relation`,
+                { relation }
+              );
+            }
+          }
+          // manyToMany doesn't use foreign key field
+        }
+      }
+
+      // Check that relation field references correct ID field
+      const relationField = sourceModel.fields.find(f => f.name === relation.field);
+      if (!relationField) {
+        throw new RelationValidationError(
+          `Relation field '${relation.field}' not found in source model '${sourceModel.name}'`,
+          { relation }
+        );
+      }
+
+      // Get the referenced field name from the relation field's foreignKey property
+      const referencedFieldName = relationField.foreignKey;
+      if (referencedFieldName) {
+        // Find referenced field in source or target model
+        let modelWithRefField: GraphQLModel | undefined;
+        let referencedField: GraphQLField | undefined;
+
+        // For all relation types, check source model only
+        referencedField = sourceModel.fields.find(f => f.name === referencedFieldName);
+        if (referencedField) {
+          modelWithRefField = sourceModel;
+        }
+
+        if (!referencedField || !modelWithRefField) {
+          throw new RelationValidationError(
+            `Field '${referencedFieldName}' referenced by @relation(field: "...") not found in source model '${sourceModel.name}'`,
+            { relation, referencedFieldName }
+          );
+        }
+
+        // Validate field type based on relation type
+        if (relation.type === 'manyToMany') {
+          // For many-to-many, referenced field should be an array of IDs
+          if (!referencedField.isArray || referencedField.type !== 'ID') {
+            throw new RelationValidationError(
+              `Field '${referencedFieldName}' in model '${modelWithRefField.name}' must be an array of IDs (type: [ID!]!) for many-to-many relation`,
+              { relation, referencedFieldName }
+            );
+          }
+        } else if (relation.type === 'oneToMany') {
+          // For oneToMany: referenced field must be array of IDs in source model
+          if (!referencedField.isArray || referencedField.type !== 'ID') {
+            throw new RelationValidationError(
+              `Field '${referencedFieldName}' in source model '${sourceModel.name}' must be an array of IDs (type: [ID!]!) for one-to-many relation`,
+              { relation, referencedFieldName }
+            );
+          }
+        } else {
+          // For manyToOne and oneToOne: referenced field must be single ID
+          if (referencedField.isArray || referencedField.type !== 'ID') {
+            throw new RelationValidationError(
+              `Field '${referencedFieldName}' in model '${modelWithRefField.name}' must be a single ID (type: ID!) for ${relation.type} relation`,
+              { relation, referencedFieldName }
+            );
+          }
         }
       }
 

@@ -1656,10 +1656,20 @@ export class ${model.name}Delegate {
         case 'oneToMany':
           lines.push(`    // Relation: ${relation.field} (oneToMany)`)
           lines.push(`    if (include.${relation.field} !== undefined) {`)
-          lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findMany({`)
-          lines.push(`        where: { ${relation.foreignKey}: document.id },`)
-          lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`)
-          lines.push(`      })`)
+          // Check foreign key location: if in source, document has array of IDs; if in target, target has foreign key
+          if (relation.foreignKeyLocation === 'source') {
+            // Foreign key is array of IDs in source document
+            lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findMany({`)
+            lines.push(`        where: { id: { in: document.${relation.foreignKey} } },`)
+            lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`)
+            lines.push(`      })`)
+          } else {
+            // Foreign key is single ID in target documents (default)
+            lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findMany({`)
+            lines.push(`        where: { ${relation.foreignKey}: document.id },`)
+            lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`)
+            lines.push(`      })`)
+          }
           lines.push(`      result.${relation.field} = ${relation.field}`)
           lines.push(`    }`)
           break;
@@ -1675,9 +1685,9 @@ export class ${model.name}Delegate {
           break;
         case 'oneToOne':
           lines.push(`    // Relation: ${relation.field} (oneToOne)`)
-          lines.push(`    if (include.${relation.field} !== undefined) {`)
-          lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findFirst({`)
-          lines.push(`        where: { ${relation.foreignKey}: document.id },`)
+          lines.push(`    if (include.${relation.field} !== undefined && document.${relation.foreignKey}) {`)
+          lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findUnique({`)
+          lines.push(`        where: { id: document.${relation.foreignKey} },`)
           lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`)
           lines.push(`      })`)
           lines.push(`      result.${relation.field} = ${relation.field}`)

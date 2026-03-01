@@ -41,7 +41,8 @@ type User @model {
   id: ID! @id
   email: String! @unique
   name: String!
-  posts: [Post!]! @relation(field: "authorId")
+  posts: [Post!]! @relation(field: "postIds")
+  postIds: [ID!]!
   createdAt: DateTime! @createdAt
   updatedAt: DateTime! @updatedAt
 }
@@ -142,9 +143,65 @@ Lenz extends GraphQL with custom directives:
 - `@unique` - Creates a unique index
 - `@index` - Creates a regular index
 - `@default(value: "...")` - Sets default value
-- `@relation(field: "...")` - Defines relation field
+- `@relation(field: "...")` - Defines relation field (foreign key must be in the same model)
 - `@createdAt` - Auto-sets creation timestamp
 - `@updatedAt` - Auto-updates timestamp
+
+## Relations
+
+Lenz requires explicit foreign key fields for all relation types:
+
+### One-to-Many / Many-to-One
+A bidirectional relationship where one side has an array and the other has a single reference:
+
+```graphql
+type Author @model {
+  id: ID! @id
+  books: [Book!]! @relation(field: "bookIds")  # one-to-many side
+  bookIds: [ID!]!                               # array of Book IDs in Author document
+}
+
+type Book @model {
+  id: ID! @id
+  author: Author! @relation(field: "authorId")  # many-to-one side
+  authorId: ID!                                 # single Author ID in Book document
+}
+```
+
+- **Author → Book (one-to-many):** Foreign key `bookIds` is an array of IDs in the Author document
+- **Book → Author (many-to-one):** Foreign key `authorId` is a single ID in the Book document
+
+### One-to-One (foreign key single ID in source model)
+```graphql
+type User @model {
+  id: ID! @id
+  profile: Profile @relation(field: "profileId")
+  profileId: ID
+}
+
+type Profile @model {
+  id: ID! @id
+  user: User @relation(field: "userId")
+  userId: ID
+}
+```
+
+### Many-to-Many (ID arrays on both sides)
+```graphql
+type Post @model {
+  id: ID! @id
+  categories: [Category!]! @relation(field: "categoryIds")
+  categoryIds: [ID!]!
+}
+
+type Category @model {
+  id: ID! @id
+  posts: [Post!]! @relation(field: "postIds")
+  postIds: [ID!]!
+}
+```
+
+**Important:** Foreign keys must always be in the **source model** (the model containing the `@relation` directive). Classic one-to-many patterns with foreign keys in target models will cause validation errors.
 
 ## Supported Field Types
 

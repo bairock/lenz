@@ -33,6 +33,7 @@ export interface ModelRelation {
   field: string;
   target: string;
   foreignKey?: string;
+  foreignKeyLocation?: 'source' | 'target';
   joinCollection?: string;
 }
 
@@ -328,14 +329,14 @@ export class GraphQLParser {
     if (!foreignKey && !isManyToMany) {
       // Автоматическая генерация по типу отношения
       if (isOneToMany) {
-        // oneToMany: foreign key находится в целевой модели, ссылается на текущую модель
-        foreignKey = `${modelName.toLowerCase()}Id`;
+        // oneToMany: foreign key находится в исходной модели как массив ID целевой модели
+        foreignKey = `${targetModel.name.toLowerCase()}Ids`;
       } else if (isManyToOne) {
-        // manyToOne: foreign key находится в текущей модели, ссылается на целевую модель
+        // manyToOne: foreign key находится в исходной модели как одиночный ID целевой модели
         foreignKey = `${targetModel.name.toLowerCase()}Id`;
       } else if (isOneToOne) {
-        // oneToOne: foreign key находится в целевой модели, ссылается на текущую модель
-        foreignKey = `${modelName.toLowerCase()}Id`;
+        // oneToOne: foreign key находится в исходной модели как одиночный ID целевой модели
+        foreignKey = `${targetModel.name.toLowerCase()}Id`;
       }
     }
 
@@ -353,14 +354,32 @@ export class GraphQLParser {
     // Для остальных типов foreignKey должен быть определен
     if (!foreignKey) {
       // Это не должно происходить, но на всякий случай генерируем
-      foreignKey = `${modelName.toLowerCase()}Id`;
+      if (isOneToMany) {
+        foreignKey = `${targetModel.name.toLowerCase()}Ids`;
+      } else {
+        // manyToOne или oneToOne
+        foreignKey = `${targetModel.name.toLowerCase()}Id`;
+      }
+    }
+
+    // Determine foreign key location
+    // For all relation types except manyToMany, foreign key must be in source model
+    let foreignKeyLocation: 'source' | 'target' = 'source';
+
+    if (foreignKey) {
+      if (isManyToOne || isOneToOne || isOneToMany) {
+        // For manyToOne, oneToOne, and oneToMany: foreign key must be in source model
+        foreignKeyLocation = 'source';
+      }
+      // manyToMany doesn't have foreign key
     }
 
     const relation: ModelRelation = {
       type: isOneToMany ? 'oneToMany' : isManyToOne ? 'manyToOne' : 'oneToOne',
       field: field.name,
       target: field.type,
-      foreignKey
+      foreignKey,
+      foreignKeyLocation
     };
 
     return relation;
