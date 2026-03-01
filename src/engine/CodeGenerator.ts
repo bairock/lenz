@@ -1118,12 +1118,59 @@ export class QueryBuilder {
     const update: UpdateFilter<any> = {}
 
     const setOperations: any = {}
-    const otherOperations: any = {}
+    const mongoOperators: any = {}
+
+    const arrayOperators = ['push', 'pull', 'addToSet', 'pop', 'pullAll', 'pushAll'];
+    const operatorMap: Record<string, string> = {
+      push: '$push',
+      pull: '$pull',
+      addToSet: '$addToSet',
+      pop: '$pop',
+      pullAll: '$pullAll',
+      pushAll: '$pushAll'
+    };
 
     for (const [key, value] of Object.entries(data)) {
       if (key.startsWith('$')) {
-        otherOperations[key] = value
+        // Already a MongoDB operator
+        mongoOperators[key] = value
       } else {
+        // Check if value is an array operator object
+        if (typeof value === 'object' && value !== null) {
+          const keys = Object.keys(value)
+
+          // Handle { push: value } or { addToSet: { each: [...] } }
+          if (keys.length === 1 && arrayOperators.includes(keys[0])) {
+            const op = keys[0]
+            const opValue = value[op]
+
+            // Check if opValue is an object with 'each' key (for $each support)
+            if (op === 'push' || op === 'addToSet') {
+              if (typeof opValue === 'object' && opValue !== null && Object.keys(opValue).length === 1 && opValue.each !== undefined) {
+                // Convert { push: { each: [...] } } to { $push: { $each: [...] } }
+                const mongoOp = operatorMap[op]
+                if (!mongoOperators[mongoOp]) {
+                  mongoOperators[mongoOp] = {}
+                }
+                mongoOperators[mongoOp][key] = { $each: opValue.each }
+                continue
+              }
+            }
+
+            // Regular array operator
+            const mongoOp = operatorMap[op]
+            if (!mongoOperators[mongoOp]) {
+              mongoOperators[mongoOp] = {}
+            }
+            mongoOperators[mongoOp][key] = opValue
+            continue
+          }
+
+          // Handle { push: { each: [...] } } where value is { each: [...] } (already handled above)
+          // Also check for nested objects with dot notation? Not supported.
+        }
+
+        // Otherwise treat as $set
         setOperations[key] = value
       }
     }
@@ -1132,7 +1179,7 @@ export class QueryBuilder {
       update.$set = setOperations
     }
 
-    Object.assign(update, otherOperations)
+    Object.assign(update, mongoOperators)
 
     return update
   }
