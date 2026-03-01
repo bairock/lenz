@@ -1249,6 +1249,11 @@ export class ${model.name}Delegate {
 
   private readonly hiddenFields: string[] = ${JSON.stringify(model.fields.filter(f => f.isHidden).map(f => f.name))};
 
+  private readonly defaultValues = {
+    ${model.fields.filter(f => f.isArray && f.isRequired && f.defaultValue === undefined).map(f => `${f.name}: []`).join(',\n    ')}
+    ${model.fields.filter(f => f.defaultValue !== undefined).map(f => `${f.name}: ${JSON.stringify(f.defaultValue)}`).join(',\n    ')}
+  };
+
   private get collection(): Collection<Document> {
     return this.client.$db.collection('${model.collectionName}')
   }
@@ -1306,6 +1311,7 @@ export class ${model.name}Delegate {
   async create(args: ${model.name}CreateArgs): Promise<${model.name}> {
     const now = new Date()
     const document = {
+      ...this.defaultValues,
       ...args.data,
       _id: new ObjectId(),
       createdAt: now,
@@ -1331,6 +1337,7 @@ export class ${model.name}Delegate {
   async createMany(args: { data: ${model.name}CreateInput[] }): Promise<{ count: number }> {
     const now = new Date()
     const documents = args.data.map(data => ({
+      ...this.defaultValues,
       ...data,
       _id: new ObjectId(),
       createdAt: now,
