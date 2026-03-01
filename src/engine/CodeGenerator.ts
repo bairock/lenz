@@ -1048,7 +1048,7 @@ export class QueryBuilder {
     return result
   }
 
-  private static buildSort(orderBy: any): any {
+  static buildSort(orderBy: any): any {
     if (Array.isArray(orderBy)) {
       return orderBy.reduce((acc, curr) => ({ ...acc, ...this.buildSort(curr) }), {})
     }
@@ -1664,31 +1664,131 @@ export class ${model.name}Delegate {
         // Generate lookup (aggregation) based code
         lines.push(`    // Relation: ${relation.field} (${relation.type}) - lookup strategy`);
         lines.push(`    if (include.${relation.field} !== undefined) {`);
+        lines.push(`      const includeOpts = include.${relation.field};`);
+        lines.push(`      let whereFilter = {};`);
+        lines.push(`      let sort = null;`);
+        lines.push(`      let skip = null;`);
+        lines.push(`      let limit = null;`);
+        lines.push(`      if (typeof includeOpts === 'object' && includeOpts !== null) {`);
+        lines.push(`        // Process include options for lookup strategy`);
+        lines.push(`        whereFilter = includeOpts.where ? QueryBuilder.buildWhere(includeOpts.where) : {};`);
+        lines.push(`        sort = includeOpts.orderBy ? QueryBuilder.buildSort(includeOpts.orderBy) : null;`);
+        lines.push(`        skip = includeOpts.skip !== undefined ? includeOpts.skip : null;`);
+        lines.push(`        limit = includeOpts.take !== undefined ? includeOpts.take : null;`);
+        lines.push(`      }`);
 
         // Determine local field (foreign key in source document)
         const localField = relation.foreignKey;
         if (!localField) {
-          // manyToMany case - TODO: implement join collection lookup
-          lines.push(`      console.warn('lookup strategy not implemented for manyToMany relation ${relation.field}')`);
-          lines.push(`      result.${relation.field} = []`);
-        } else {
-          // Build aggregation pipeline
+          // manyToMany with join collection (no foreign key array)
+          if (relation.type === 'manyToMany' && relation.joinCollection) {
+            // Use RelationResolver for join collection lookup
+            lines.push(`      const ${relation.field} = await RelationResolver.resolveManyToMany(`);
+            lines.push(`        this.client.$db,`);
+            lines.push(`        '${model.collectionName}',`);
+            lines.push(`        '${this.toCollectionName(relation.target)}',`);
+            lines.push(`        '${relation.joinCollection}',`);
+            lines.push(`        document.id`);
+            lines.push(`      )`);
+            lines.push(`      result.${relation.field} = ${relation.field}`);
+          } else {
+            lines.push(`      console.warn('lookup strategy not implemented for relation ${relation.field} without foreign key')`);
+            lines.push(`      result.${relation.field} = []`);
+          }
+        } else if (relation.isForeignKeyArray) {
+          // Foreign key is an array of IDs (could be oneToMany or manyToMany with array in source)
+          // Use $lookup with pipeline and $in to match IDs
+          // Build inner pipeline stages for array foreign key lookup
+          lines.push(`      const innerPipeline = [`);
+          lines.push(`        {`);
+          lines.push(`          $match: {`);
+          lines.push(`            $expr: {`);
+          lines.push(`              $in: [`);
+          lines.push(`                '$_id',`);
+          lines.push(`                {`);
+          lines.push(`                  $map: {`);
+          lines.push(`                    input: { $ifNull: ['$$ids', []] },`);
+          lines.push(`                    as: 'id',`);
+          lines.push(`                    in: { $toObjectId: '$$id' }`);
+          lines.push(`                  }`);
+          lines.push(`                }`);
+          lines.push(`              ]`);
+          lines.push(`            }`);
+          lines.push(`          }`);
+          lines.push(`        }`);
+          lines.push(`      ];`);
+          lines.push(`      // Add additional stages if include options provided`);
+          lines.push(`      if (whereFilter && Object.keys(whereFilter).length > 0) {`);
+          lines.push(`        innerPipeline.push({ $match: whereFilter });`);
+          lines.push(`      }`);
+          lines.push(`      if (sort) {`);
+          lines.push(`        innerPipeline.push({ $sort: sort });`);
+          lines.push(`      }`);
+          lines.push(`      if (skip !== null) {`);
+          lines.push(`        innerPipeline.push({ $skip: skip });`);
+          lines.push(`      }`);
+          lines.push(`      if (limit !== null) {`);
+          lines.push(`        innerPipeline.push({ $limit: limit });`);
+          lines.push(`      }`);
           lines.push(`      const pipeline = [`);
           lines.push(`        { $match: { _id: document._id } },`);
           lines.push(`        { $lookup: {`);
           lines.push(`          from: '${this.toCollectionName(relation.target)}',`);
-          lines.push(`          localField: '${localField}',`);
-          lines.push(`          foreignField: '_id',`);
+          lines.push(`          let: { ids: '$${localField}' },`);
+          lines.push(`          pipeline: innerPipeline,`);
           lines.push(`          as: '${relation.field}_lookup'`);
           lines.push(`        } }`);
-
+          lines.push(`      ];`);
+          lines.push(`      const aggResult = await this.collection.aggregate(pipeline).toArray()`);
+          lines.push(`      if (aggResult.length > 0) {`);
+          lines.push(`        result.${relation.field} = aggResult[0].${relation.field}_lookup`);
+          // Handle nested include? (TODO)
+          lines.push(`      } else {`);
+          lines.push(`        result.${relation.field} = []`);
+          lines.push(`      }`);
+        } else {
+          // Foreign key is a single ID (oneToOne, manyToOne, oneToMany with foreign key in target)
+          // Use standard $lookup with localField/foreignField
+          // Build inner pipeline for single foreign key lookup
+          lines.push(`      const innerPipeline = [`);
+          lines.push(`        {`);
+          lines.push(`          $match: {`);
+          lines.push(`            $expr: {`);
+          lines.push(`              $eq: [`);
+          lines.push(`                '$_id',`);
+          lines.push(`                { $toObjectId: '$$localId' }`);
+          lines.push(`              ]`);
+          lines.push(`            }`);
+          lines.push(`          }`);
+          lines.push(`        }`);
+          lines.push(`      ];`);
+          lines.push(`      // Add additional stages if include options provided`);
+          lines.push(`      if (whereFilter && Object.keys(whereFilter).length > 0) {`);
+          lines.push(`        innerPipeline.push({ $match: whereFilter });`);
+          lines.push(`      }`);
+          lines.push(`      if (sort) {`);
+          lines.push(`        innerPipeline.push({ $sort: sort });`);
+          lines.push(`      }`);
+          lines.push(`      if (skip !== null) {`);
+          lines.push(`        innerPipeline.push({ $skip: skip });`);
+          lines.push(`      }`);
+          lines.push(`      if (limit !== null) {`);
+          lines.push(`        innerPipeline.push({ $limit: limit });`);
+          lines.push(`      }`);
+          lines.push(`      const pipeline = [`);
+          lines.push(`        { $match: { _id: document._id } },`);
+          lines.push(`        { $lookup: {`);
+          lines.push(`          from: '${this.toCollectionName(relation.target)}',`);
+          lines.push(`          let: { localId: '$${localField}' },`);
+          lines.push(`          pipeline: innerPipeline,`);
+          lines.push(`          as: '${relation.field}_lookup'`);
+          lines.push(`        } }`);
+          lines.push(`      ];`);
           // Add unwind for single relations (oneToOne, manyToOne)
           const needUnwind = relation.type === 'oneToOne' || relation.type === 'manyToOne';
           if (needUnwind) {
-            lines.push(`        ,{ $unwind: { path: '$${relation.field}_lookup', preserveNullAndEmptyArrays: true } }`);
+            lines.push(`        pipeline.push({ $unwind: { path: '$${relation.field}_lookup', preserveNullAndEmptyArrays: true } });`);
           }
-
-          lines.push(`      ]`);
           lines.push(`      const aggResult = await this.collection.aggregate(pipeline).toArray()`);
           lines.push(`      if (aggResult.length > 0) {`);
           lines.push(`        result.${relation.field} = aggResult[0].${relation.field}_lookup`);
@@ -1747,10 +1847,33 @@ export class ${model.name}Delegate {
             lines.push(`    }`);
             break;
           case 'manyToMany':
-            lines.push(`    // Relation: ${relation.field} (manyToMany) - TODO: implement manyToMany relation loading`);
+            lines.push(`    // Relation: ${relation.field} (manyToMany) - populate strategy`);
             lines.push(`    if (include.${relation.field} !== undefined) {`);
-            lines.push(`      console.warn('manyToMany relation loading not yet implemented for ${relation.field}')`);
-            lines.push(`      result.${relation.field} = []`);
+            if (relation.foreignKey) {
+              // manyToMany with foreign key array (IDs array) - similar to oneToMany with source foreign key
+              lines.push(`      if (document.${relation.foreignKey} && Array.isArray(document.${relation.foreignKey})) {`);
+              lines.push(`        const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findMany({`);
+              lines.push(`          where: { id: { in: document.${relation.foreignKey} } },`);
+              lines.push(`          include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`);
+              lines.push(`        })`);
+              lines.push(`        result.${relation.field} = ${relation.field}`);
+              lines.push(`      } else {`);
+              lines.push(`        result.${relation.field} = []`);
+              lines.push(`      }`);
+            } else if (relation.joinCollection) {
+              // manyToMany with join collection - use RelationResolver
+              lines.push(`      const ${relation.field} = await RelationResolver.resolveManyToMany(`);
+              lines.push(`        this.client.$db,`);
+              lines.push(`        '${model.collectionName}',`);
+              lines.push(`        '${this.toCollectionName(relation.target)}',`);
+              lines.push(`        '${relation.joinCollection}',`);
+              lines.push(`        document.id`);
+              lines.push(`      )`);
+              lines.push(`      result.${relation.field} = ${relation.field}`);
+            } else {
+              lines.push(`      console.warn('manyToMany relation ${relation.field} has no foreign key or join collection')`);
+              lines.push(`      result.${relation.field} = []`);
+            }
             lines.push(`    }`);
             break;
         }

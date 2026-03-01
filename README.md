@@ -65,7 +65,7 @@ type Post @model {
   author: User! @relation(field: "authorId")
   authorId: ID!  # Foreign key index automatically created
 
-  # Many-to-many relationship (populate by default)
+  # Many-to-many relationship with ID arrays (auto-selects lookup strategy)
   categories: [Category!]! @relation(field: "categoryIds")
   categoryIds: [ID!]!  # Multikey index automatically created
 }
@@ -163,7 +163,7 @@ async function main() {
     take: 10,
     include: {
       author: true,      // populate strategy
-      categories: true   // lookup strategy (if index: false, no auto-index)
+      categories: true   // many-to-many lookup strategy (server-side join with $lookup)
     }
   });
 
@@ -181,6 +181,32 @@ async function main() {
       }
     });
   });
+
+  // Advanced many-to-many lookup with filtering
+  // Uses MongoDB aggregation pipeline for server-side joins
+  const postsWithTechCategories = await lenz.post.findMany({
+    where: {
+      categories: {
+        some: {
+          name: { equals: 'Technology' }
+        }
+      }
+    },
+    include: {
+      categories: {
+        where: {
+          name: { equals: 'Technology' }
+        }
+      }
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 5
+  });
+
+  // Note: For lookup strategy, array synchronization is manual
+  // When creating relationships, update both arrays:
+  // await lenz.post.update({ where: { id: postId }, data: { categoryIds: { push: categoryId } } });
+  // await lenz.category.update({ where: { id: categoryId }, data: { postIds: { push: postId } } });
 
   await lenz.$disconnect();
 }
@@ -300,7 +326,7 @@ type Profile @model {
 ```graphql
 type Post @model {
   id: ID! @id
-  categories: [Category!]! @relation(field: "categoryIds")  # auto: populate strategy
+  categories: [Category!]! @relation(field: "categoryIds")  # auto: lookup strategy (default for arrays)
   categoryIds: [ID!]!                                        # multikey index
 }
 
@@ -311,10 +337,49 @@ type Category @model {
 }
 ```
 
-- **Strategy:** Uses `populate` by default (`lookup` not yet implemented for many-to-many)
+- **Strategy:** Uses `lookup` by default when foreign key arrays are specified (server-side joins with MongoDB's `$lookup` aggregation), `populate` for join collections
 - **Indexes:** Multikey indexes on both array fields (configurable with `index: false`)
 - **Bidirectional:** Both sides maintain arrays of IDs
-- **Manual sync:** You must synchronize both arrays when creating/updating relations
+- **Manual sync:** You must manually synchronize both arrays when creating/updating relations (for `lookup` strategy)
+
+**Example - Manual synchronization for many-to-many lookup strategy:**
+
+```typescript
+// Create a post and category
+const post = await lenz.post.create({
+  data: {
+    title: 'My Post',
+    categoryIds: [] // Initialize empty array
+  }
+});
+
+const category = await lenz.category.create({
+  data: {
+    name: 'Technology',
+    postIds: [] // Initialize empty array
+  }
+});
+
+// Add category to post
+await lenz.post.update({
+  where: { id: post.id },
+  data: {
+    categoryIds: {
+      push: category.id // Add category ID to post's array
+    }
+  }
+});
+
+// Add post to category (bidirectional sync)
+await lenz.category.update({
+  where: { id: category.id },
+  data: {
+    postIds: {
+      push: post.id // Add post ID to category's array
+    }
+  }
+});
+```
 
 **Important:** Foreign keys must always be in the **source model** (the model containing the `@relation` directive). Classic one-to-many patterns with foreign keys in target models will cause validation errors.
 
@@ -346,14 +411,62 @@ type Author @model {
 
 **Note:** When using `lookup` strategy, you must manually synchronize ID arrays (e.g., `bookIds`) when creating/updating/deleting related documents.
 
+**Include options support:** Lookup strategy now supports `where`, `orderBy`, `take`, and `skip` options for filtering, sorting, and paginating related documents.
+
+Example:
+```typescript
+const author = await lenz.author.findUnique({
+  where: { id: 'author-id' },
+  include: {
+    books: {
+      where: { published: true },
+      orderBy: { createdAt: 'desc' },
+      take: 5
+    }
+  }
+});
+```
+
 ### Automatic Strategy Selection
 
 | Relation Type | Default Strategy | Reason |
 |--------------|------------------|--------|
 | `oneToOne` | `populate` | Simple relationships, no arrays |
 | `manyToOne` | `populate` | Single reference, no arrays |
-| `oneToMany` | `lookup` | Array of IDs, bidirectional relationships |
-| `manyToMany` | `populate` | Requires manual synchronization |
+| `oneToMany` | `lookup` | Array of IDs in source document (e.g., Author.bookIds) |
+| `manyToMany` | `lookup` (if foreign key array specified) or `populate` (if join collection) | Foreign key arrays use server-side joins, join collections use separate queries |
+
+**Note:** The lookup strategy now supports include options (where, orderBy, take, skip) for both array foreign keys and single foreign key relations. However, nested includes are not yet supported for lookup strategy but are fully supported for populate strategy.
+
+**Many-to-Many Lookup Strategy:**
+
+When a many-to-many relationship uses foreign key arrays (either single-sided or both sides), Lenz automatically uses the `lookup` strategy with MongoDB's `$lookup` aggregation operator. This performs server-side joins for optimal read performance. For example, `post.categoryIds` array referencing categories.
+
+```graphql
+type Post @model {
+  categories: [Category!]! @relation(field: "categoryIds", strategy: "lookup")
+  categoryIds: [ID!]!  # multikey index automatically created
+}
+
+type Category @model {
+  posts: [Post!]! @relation(field: "postIds", strategy: "lookup", index: false)
+  postIds: [ID!]!  # no auto-index (index: false)
+}
+```
+
+**Many-to-Many Populate Strategy:**
+
+When a many-to-many relationship uses a join collection (no foreign key arrays), Lenz uses the `populate` strategy with separate queries.
+
+```graphql
+type Post @model {
+  categories: [Category!]! @relation  # no field parameter → join collection
+}
+
+type Category @model {
+  posts: [Post!]! @relation
+}
+```
 
 ### Automatic Indexing
 
@@ -413,21 +526,40 @@ type Author @model {
 - **Handle race conditions** with optimistic concurrency or transactions
 - **Implement soft deletes** with `deletedAt` field instead of hard deletes
 
-### 6. When to Use Each Strategy
+### 6. Many-to-Many Performance Optimization
+- **Array size limits:** Keep array sizes reasonable (<1000 elements). Large arrays increase `$lookup` complexity and memory usage.
+- **Batch synchronization:** When updating multiple relationships, batch array operations to reduce database round trips.
+- **Index management:** Regularly monitor and optimize multikey indexes for array fields.
+- **Alternative approaches:** For extremely large many-to-many relationships, consider:
+  - **Denormalization:** Embed frequently accessed data
+  - **Hybrid approach:** Use `lookup` for recent/active relationships, `populate` for historical
+  - **Materialized views:** Pre-compute relationships for read-heavy scenarios
+
+### 7. When to Use Each Strategy
 
 #### Use **Populate** when:
 - Simple one-to-one or many-to-one relationships
 - Working with sharded clusters (`$lookup` doesn't work across shards)
 - Relationships are rarely accessed
 - You prefer automatic data consistency
+- Many-to-many relationships with join collections (no foreign key arrays)
+- Small datasets where separate queries are acceptable
 
 #### Use **Lookup** when:
-- High-read scenarios with one-to-many relationships
+- High-read scenarios with one-to-many or many-to-many relationships
 - Need server-side joins for complex filtering/sorting
 - Willing to manually maintain ID arrays
 - Maximum read performance is critical
+- Many-to-many relationships with foreign key arrays (both sides)
+- Medium to large datasets where join performance matters
 
-### 7. Production Readiness
+#### Special Considerations for Many-to-Many Lookup:
+- **Array size:** Large arrays (>1000 IDs) can impact `$lookup` performance. Consider denormalization or hybrid approaches.
+- **Indexing:** Multikey indexes are essential for array fields. Monitor index size and performance.
+- **Consistency:** Manual array synchronization requires careful application logic to maintain data integrity.
+- **Sharding:** `$lookup` doesn't work across shards. For sharded clusters, use `populate` strategy or ensure related documents are on the same shard.
+
+### 8. Production Readiness
 - **Enable replica set** for transaction support
 - **Set up proper connection pooling** in `lenz.config.ts`
 - **Implement retry logic** for transient failures

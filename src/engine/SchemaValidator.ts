@@ -470,10 +470,15 @@ export class SchemaValidator {
       // Validate lookup strategy requirements
       if (relation.strategy === 'lookup') {
         if (relation.type === 'manyToMany') {
-          console.warn(
-            `⚠️  Lookup strategy is not yet implemented for manyToMany relation '${relation.field}' -> '${relation.target}'. ` +
-            `Will fallback to populate.`
-          );
+          // For manyToMany, foreign key or join collection is required for lookup
+          if (!relation.foreignKey && !relation.joinCollection) {
+            throw new SchemaValidationError(
+              `Lookup strategy for manyToMany relation '${relation.field}' -> '${relation.target}' requires either a foreign key field or join collection. ` +
+              `Add @relation(field: "...") directive with a foreign key field.`
+            );
+          }
+          // lookup is now implemented for manyToMany with foreign key (array of IDs)
+          // and for join collection via RelationResolver
         } else if (!relation.foreignKey) {
           // For other relation types (oneToMany, manyToOne, oneToOne), foreign key is required
           throw new SchemaValidationError(

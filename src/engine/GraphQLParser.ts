@@ -39,6 +39,7 @@ export interface ModelRelation {
   joinCollection: string | undefined;
   strategy: 'populate' | 'lookup';
   index: boolean;
+  isForeignKeyArray: boolean;
 }
 
 export interface ModelIndex {
@@ -347,12 +348,24 @@ export class GraphQLParser {
     if (field.isArray) {
       // Массив может быть oneToMany или manyToMany
       if (foreignKey && foreignKey.endsWith('Ids')) {
-        relationType = 'oneToMany';
+        // Проверяем обратное поле в target модели, чтобы определить oneToMany vs manyToMany
+        const reverseField = targetModel.fields.find(f =>
+          f.isRelation && f.type === modelName
+        );
+        if (reverseField && reverseField.isArray) {
+          // Обратное поле также массив → manyToMany
+          relationType = 'manyToMany';
+        } else {
+          // Обратное поле не массив или не найдено → oneToMany
+          relationType = 'oneToMany';
+        }
       } else {
-        // manyToMany отношение требует join-коллекции
         relationType = 'manyToMany';
-        joinCollection = this.getJoinCollectionName(modelName, field.type);
-        foreignKey = undefined; // для manyToMany foreignKey не используется
+        // Если foreignKey не указан, используем join-коллекцию
+        if (!foreignKey) {
+          joinCollection = this.getJoinCollectionName(modelName, field.type);
+        }
+        // foreignKey остается как есть (может быть указан для массива ID)
       }
     } else {
       // Одиночное поле - manyToOne или oneToOne
@@ -375,10 +388,22 @@ export class GraphQLParser {
       // Двусторонние связи с массивами ID (например, Author.bookIds) используют lookup
       defaultStrategy = 'lookup';
     } else if (relationType === 'manyToMany') {
-      // manyToMany пока не поддерживает lookup (требует join-коллекции)
-      defaultStrategy = 'populate';
+      // manyToMany: если указан foreignKey (массив ID), используем lookup, иначе populate (join-коллекция)
+      defaultStrategy = foreignKey ? 'lookup' : 'populate';
     }
     // manyToOne и oneToOne используют populate по умолчанию
+
+    // Определяем, является ли foreign key массивом
+    let isForeignKeyArray = false;
+    if (foreignKey) {
+      const sourceModel = this.models.get(modelName);
+      if (sourceModel) {
+        const foreignKeyField = sourceModel.fields.find(f => f.name === foreignKey);
+        if (foreignKeyField) {
+          isForeignKeyArray = foreignKeyField.isArray;
+        }
+      }
+    }
 
     const relation: ModelRelation = {
       type: relationType,
@@ -388,7 +413,8 @@ export class GraphQLParser {
       foreignKeyLocation,
       joinCollection,
       strategy: field.relationStrategy ?? defaultStrategy,
-      index: field.relationIndex ?? true
+      index: field.relationIndex ?? true,
+      isForeignKeyArray
     };
 
     return relation;

@@ -26,7 +26,10 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(del:*)",
-      "Bash(npm run lint)"
+      "Bash(npm run lint)",
+      "Bash(dir:*)",
+      "Bash(npm run type-check:*)",
+      "Bash(npm run:*)"
     ],
     "deny": [],
     "ask": []
