@@ -14,6 +14,273 @@ GraphQL-based ORM for MongoDB (Prisma style)
 - ✅ **Automatic Indexing** - Intelligent index creation for foreign key fields
 - ✅ **Transactions** - ACID transactions with MongoDB
 
+## CRUD Operations
+
+Lenz provides a comprehensive set of CRUD operations similar to Prisma, with full TypeScript support and MongoDB-native performance.
+
+### Create
+
+**Create a single record:**
+```ts
+const user = await lenz.user.create({
+  data: {
+    email: "elsa@prisma.io",
+    name: "Elsa Prisma",
+  },
+});
+```
+
+**Create multiple records:**
+```ts
+const createMany = await lenz.user.createMany({
+  data: [
+    { name: "Bob", email: "bob@prisma.io" },
+    { name: "Yewande", email: "yewande@prisma.io" },
+  ],
+});
+// Returns: { count: 2 }
+```
+
+### Read
+
+**Get record by ID or unique field:**
+```ts
+// By unique field
+const user = await lenz.user.findUnique({
+  where: { email: "elsa@prisma.io" },
+});
+
+// By ID
+const user = await lenz.user.findUnique({
+  where: { id: "99" },
+});
+```
+
+**Get all records:**
+```ts
+const users = await lenz.user.findMany();
+```
+
+**Get first matching record:**
+```ts
+const user = await lenz.user.findFirst({
+  where: { posts: { some: { likes: { gt: 100 } } } },
+  orderBy: { id: "desc" },
+});
+```
+
+**Filter records:**
+```ts
+// Single field filter
+const users = await lenz.user.findMany({
+  where: { email: { endsWith: "prisma.io" } },
+});
+
+// Multiple conditions with OR/AND
+const users = await lenz.user.findMany({
+  where: {
+    OR: [{ name: { startsWith: "E" } }, { AND: { profileViews: { gt: 0 }, role: "ADMIN" } }],
+  },
+});
+
+// Filter by related records
+const users = await lenz.user.findMany({
+  where: {
+    email: { endsWith: "prisma.io" },
+    posts: { some: { published: false } },
+  },
+});
+```
+
+**Select fields:**
+```ts
+const user = await lenz.user.findUnique({
+  where: { email: "emma@prisma.io" },
+  select: { email: true, name: true },
+});
+// Returns: { email: 'emma@prisma.io', name: "Emma" }
+```
+
+**Include related records:**
+```ts
+const users = await lenz.user.findMany({
+  where: { role: "ADMIN" },
+  include: { posts: true },
+});
+```
+
+### Update
+
+**Update a single record:**
+```ts
+const updateUser = await lenz.user.update({
+  where: { email: "viola@prisma.io" },
+  data: { name: "Viola the Magnificent" },
+});
+```
+
+**Update multiple records:**
+```ts
+const updateUsers = await lenz.user.updateMany({
+  where: { email: { contains: "prisma.io" } },
+  data: { role: "ADMIN" },
+});
+// Returns: { count: 19 }
+```
+
+**Upsert (update or create):**
+```ts
+const upsertUser = await lenz.user.upsert({
+  where: { email: "viola@prisma.io" },
+  update: { name: "Viola the Magnificent" },
+  create: { email: "viola@prisma.io", name: "Viola the Magnificent" },
+});
+```
+
+**Atomic number operations:**
+```ts
+await lenz.post.updateMany({
+  data: {
+    views: { increment: 1 },
+    likes: { increment: 1 },
+  },
+});
+```
+
+### Delete
+
+**Delete a single record:**
+```ts
+const deleteUser = await lenz.user.delete({
+  where: {
+    email: "bert@prisma.io",
+  },
+});
+```
+
+**Delete multiple records:**
+```ts
+const deleteUsers = await lenz.user.deleteMany({
+  where: {
+    email: {
+      contains: "prisma.io",
+    },
+  },
+});
+```
+
+**Delete all records:**
+```ts
+const deleteUsers = await lenz.user.deleteMany({});
+```
+
+**Cascading deletes:** Lenz does not automatically cascade deletes. You must manually delete related records or use transactions:
+
+```ts
+const transaction = await lenz.$transaction([
+  lenz.post.deleteMany({ where: { authorId: "7" } }),
+  lenz.user.delete({ where: { id: "7" } }),
+]);
+```
+
+### Pagination
+
+Lenz supports both offset-based and cursor-based pagination directly in the `findMany` method.
+
+**Offset-based pagination (skip/take):**
+```ts
+// Get records 41-50 (page 5 with 10 per page)
+const users = await lenz.user.findMany({
+  skip: 40,
+  take: 10,
+  where: { /* your filters */ },
+  orderBy: { createdAt: 'desc' }
+});
+```
+
+**Cursor-based pagination (more efficient for large datasets):**
+```ts
+// Get first page (first 10 records)
+const firstPage = await lenz.post.findMany({
+  take: 10,
+  where: { published: true },
+  orderBy: { id: 'asc' },
+});
+
+const lastPost = firstPage[9]; // Last item on page
+const cursor = lastPost?.id; // Use ID as cursor (string)
+
+// Get next page (next 10 records AFTER cursor)
+const nextPage = await lenz.post.findMany({
+  take: 10,
+  skip: 1, // Skip the cursor item itself to avoid duplication
+  cursor: cursor, // Pass cursor as string
+  where: { published: true },
+  orderBy: { id: 'asc' },
+});
+```
+
+**Note:** For cursor-based pagination, the cursor should be the value of the field you're ordering by (typically `id`). The cursor is passed as a string or ObjectId. Ensure the field is unique and sequential.
+
+### Aggregation
+
+Lenz provides direct access to MongoDB aggregation pipeline for complex data analysis, as well as count operations.
+
+**Basic aggregation with MongoDB pipeline:**
+```ts
+const aggregations = await lenz.user.aggregate([
+  { $match: { role: "ADMIN" } },
+  { $group: { _id: "$country", totalViews: { $sum: "$profileViews" } } },
+  { $sort: { totalViews: -1 } }
+]);
+```
+
+**Count operations:**
+```ts
+// Count all users
+const userCount = await lenz.user.count();
+
+// Count with filtering
+const activeUsers = await lenz.user.count({
+  where: { profileViews: { gte: 100 } },
+});
+
+// Count relations (using _count in select)
+const usersWithPostCount = await lenz.user.findMany({
+  select: {
+    _count: {
+      select: { posts: true },
+    },
+  },
+});
+```
+
+**Aggregation with grouping and filtering:**
+```ts
+// Group posts by category and calculate average likes
+const stats = await lenz.post.aggregate([
+  { $match: { published: true } },
+  { $group: {
+      _id: "$categoryId",
+      totalPosts: { $sum: 1 },
+      avgLikes: { $avg: "$likes" },
+      maxLikes: { $max: "$likes" }
+  }},
+  { $sort: { avgLikes: -1 } }
+]);
+```
+
+**Distinct values:**
+```ts
+// Get distinct roles using aggregation
+const distinctRoles = await lenz.user.aggregate([
+  { $group: { _id: "$role" } },
+  { $project: { role: "$_id" } }
+]);
+```
+
+**Note:** The `aggregate()` method accepts raw MongoDB aggregation pipeline stages. For type-safe aggregations, you can define TypeScript interfaces for the aggregation result.
+
 ## Quick Start
 
 ### 1. Install Lenz
