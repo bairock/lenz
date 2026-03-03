@@ -46,6 +46,24 @@ export class SchemaValidator {
   }
 
   /**
+   * Check if a field is a foreign key field (referenced by a relation)
+   */
+  private isForeignKeyField(modelName: string, fieldName: string): boolean {
+    for (const model of this.models) {
+      for (const relation of model.relations) {
+        if (relation.foreignKey === fieldName) {
+          // Check if this relation belongs to the specified model
+          // The relation is stored in the model's relations array, so model is the source
+          if (model.name === modelName) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
    * Validate the entire schema
    */
   validate(options: ValidationOptions = {}): void {
@@ -133,7 +151,7 @@ export class SchemaValidator {
         }
 
         // Additional type-specific validations
-        if (field.type === 'ID' && !field.isId) {
+        if (field.type === 'ID' && !field.isId && !this.isForeignKeyField(model.name, field.name)) {
           // ID fields should typically have @id directive
           // This is a warning, not an error
           console.warn(
@@ -412,7 +430,8 @@ export class SchemaValidator {
       for (const field of model.fields) {
         if (field.isRequired && !field.isId && !field.defaultValue) {
           // Check if it's a relation field (relations can be required but handled differently)
-          if (!field.isRelation) {
+          if (!field.isRelation && !this.isForeignKeyField(model.name, field.name) &&
+              !field.directives.includes('createdAt') && !field.directives.includes('updatedAt')) {
             console.warn(
               `⚠️  Required field '${field.name}' in model '${model.name}' has no default value`
             );
@@ -511,7 +530,9 @@ export class SchemaValidator {
 
       // Warn about required fields without defaults
       for (const field of model.fields) {
-        if (field.isRequired && !field.isId && !field.defaultValue && !field.isRelation) {
+        if (field.isRequired && !field.isId && !field.defaultValue && !field.isRelation &&
+            !this.isForeignKeyField(model.name, field.name) &&
+            !field.directives.includes('createdAt') && !field.directives.includes('updatedAt')) {
           warnings.push(
             `Required field '${field.name}' in model '${model.name}' has no default value`
           );
