@@ -1210,6 +1210,7 @@ export class QueryBuilder {
 // @generated
 
 import { Db, ObjectId } from 'mongodb'
+import { QueryBuilder } from './query'
 
 export class RelationResolver {
   static async resolveOneToOne(
@@ -1239,7 +1240,12 @@ export class RelationResolver {
     sourceCollection: string,
     targetCollection: string,
     joinCollection: string,
-    sourceId: string
+    sourceId: string,
+    where?: any,
+    orderBy?: any,
+    take?: number,
+    skip?: number,
+    select?: any
   ): Promise<any[]> {
     const joinCol = db.collection(joinCollection)
     const targetCol = db.collection(targetCollection)
@@ -1250,9 +1256,44 @@ export class RelationResolver {
 
     const targetIds = connections.map(c => c[\`\${targetCollection.toLowerCase()}Id\`])
 
-    return await targetCol.find({
-      _id: { $in: targetIds.map(id => new ObjectId(id)) }
-    }).toArray()
+    if (targetIds.length === 0) {
+      return []
+    }
+
+    let query: any = { _id: { $in: targetIds.map(id => new ObjectId(id)) } }
+
+    // Apply where filter if provided
+    if (where && Object.keys(where).length > 0) {
+      // Merge where with the existing $in condition
+      query = { $and: [query, where] }
+    }
+
+    let cursor = targetCol.find(query)
+
+    // Apply sorting
+    if (orderBy) {
+      cursor = cursor.sort(orderBy)
+    }
+
+    // Apply skip
+    if (skip !== undefined && skip !== null) {
+      cursor = cursor.skip(skip)
+    }
+
+    // Apply limit
+    if (take !== undefined && take !== null) {
+      cursor = cursor.limit(take)
+    }
+
+    // Apply projection if select provided
+    if (select) {
+      const projection = QueryBuilder.buildProjection(select, [])
+      if (projection) {
+        cursor = cursor.project(projection)
+      }
+    }
+
+    return await cursor.toArray()
   }
 
   static formatDocument(doc: any): any {
@@ -1694,7 +1735,7 @@ export class ${model.name}Delegate {
     return result;
   }
 
-  private async includeRelations(document: any, include: any): Promise<any> {
+  public async includeRelations(document: any, include: any): Promise<any> {
     const result = { ...document }
     if (!include || typeof include !== 'object') {
       return result
@@ -1734,12 +1775,16 @@ export class ${model.name}Delegate {
         lines.push(`      let sort = null;`);
         lines.push(`      let skip = null;`);
         lines.push(`      let limit = null;`);
+        lines.push(`      let select = undefined;`);
+        lines.push(`      let nestedInclude = undefined;`);
         lines.push(`      if (typeof includeOpts === 'object' && includeOpts !== null) {`);
         lines.push(`        // Process include options for lookup strategy`);
         lines.push(`        whereFilter = includeOpts.where ? QueryBuilder.buildWhere(includeOpts.where) : {};`);
         lines.push(`        sort = includeOpts.orderBy ? QueryBuilder.buildSort(includeOpts.orderBy) : null;`);
         lines.push(`        skip = includeOpts.skip !== undefined ? includeOpts.skip : null;`);
         lines.push(`        limit = includeOpts.take !== undefined ? includeOpts.take : null;`);
+        lines.push(`        select = includeOpts.select;`);
+        lines.push(`        nestedInclude = includeOpts.include;`);
         lines.push(`      }`);
 
         // Determine local field (foreign key in source document)
@@ -1748,14 +1793,25 @@ export class ${model.name}Delegate {
           // manyToMany with join collection (no foreign key array)
           if (relation.type === 'manyToMany' && relation.joinCollection) {
             // Use RelationResolver for join collection lookup
-            lines.push(`      const ${relation.field} = await RelationResolver.resolveManyToMany(`);
+            lines.push(`      let ${relation.field}Result = await RelationResolver.resolveManyToMany(`);
             lines.push(`        this.client.$db,`);
             lines.push(`        '${model.collectionName}',`);
             lines.push(`        '${this.toCollectionName(relation.target)}',`);
             lines.push(`        '${relation.joinCollection}',`);
-            lines.push(`        document.id`);
+            lines.push(`        document.id,`);
+            lines.push(`        whereFilter,`);
+            lines.push(`        sort,`);
+            lines.push(`        limit,`);
+            lines.push(`        skip,`);
+            lines.push(`        select`);
             lines.push(`      )`);
-            lines.push(`      result.${relation.field} = ${relation.field}`);
+            lines.push(`      // Handle nested include`);
+            lines.push(`      if (nestedInclude && ${relation.field}Result && Array.isArray(${relation.field}Result)) {`);
+            lines.push(`        ${relation.field}Result = await Promise.all(${relation.field}Result.map(doc =>`);
+            lines.push(`          this.client.${this.toCamelCase(relation.target)}.includeRelations(doc, nestedInclude)`);
+            lines.push(`        ))`);
+            lines.push(`      }`);
+            lines.push(`      result.${relation.field} = ${relation.field}Result`);
           } else {
             lines.push(`      console.warn('lookup strategy not implemented for relation ${relation.field} without foreign key')`);
             lines.push(`      result.${relation.field} = []`);
@@ -1806,8 +1862,18 @@ export class ${model.name}Delegate {
           lines.push(`      ];`);
           lines.push(`      const aggResult = await this.collection.aggregate(pipeline).toArray()`);
           lines.push(`      if (aggResult.length > 0) {`);
-          lines.push(`        result.${relation.field} = aggResult[0].${relation.field}_lookup`);
-          // Handle nested include? (TODO)
+          lines.push(`        let ${relation.field}Result = aggResult[0].${relation.field}_lookup`);
+          lines.push(`        // Handle nested include`);
+          lines.push(`        if (nestedInclude && ${relation.field}Result) {`);
+          lines.push(`          if (Array.isArray(${relation.field}Result)) {`);
+          lines.push(`            ${relation.field}Result = await Promise.all(${relation.field}Result.map(doc =>`);
+          lines.push(`              this.client.${this.toCamelCase(relation.target)}.includeRelations(doc, nestedInclude)`);
+          lines.push(`            ))`);
+          lines.push(`          } else {`);
+          lines.push(`            ${relation.field}Result = await this.client.${this.toCamelCase(relation.target)}.includeRelations(${relation.field}Result, nestedInclude)`);
+          lines.push(`          }`);
+          lines.push(`        }`);
+          lines.push(`        result.${relation.field} = ${relation.field}Result`);
           lines.push(`      } else {`);
           lines.push(`        result.${relation.field} = []`);
           lines.push(`      }`);
@@ -1856,8 +1922,18 @@ export class ${model.name}Delegate {
           }
           lines.push(`      const aggResult = await this.collection.aggregate(pipeline).toArray()`);
           lines.push(`      if (aggResult.length > 0) {`);
-          lines.push(`        result.${relation.field} = aggResult[0].${relation.field}_lookup`);
-          // Handle nested include? (TODO)
+          lines.push(`        let ${relation.field}Result = aggResult[0].${relation.field}_lookup`);
+          lines.push(`        // Handle nested include`);
+          lines.push(`        if (nestedInclude && ${relation.field}Result) {`);
+          lines.push(`          if (Array.isArray(${relation.field}Result)) {`);
+          lines.push(`            ${relation.field}Result = await Promise.all(${relation.field}Result.map(doc =>`);
+          lines.push(`              this.client.${this.toCamelCase(relation.target)}.includeRelations(doc, nestedInclude)`);
+          lines.push(`            ))`);
+          lines.push(`          } else {`);
+          lines.push(`            ${relation.field}Result = await this.client.${this.toCamelCase(relation.target)}.includeRelations(${relation.field}Result, nestedInclude)`);
+          lines.push(`          }`);
+          lines.push(`        }`);
+          lines.push(`        result.${relation.field} = ${relation.field}Result`);
           lines.push(`      } else {`);
           lines.push(`        result.${relation.field} = ${needUnwind ? 'null' : '[]'}`);
           lines.push(`      }`);
@@ -1869,13 +1945,34 @@ export class ${model.name}Delegate {
           case 'oneToMany':
             lines.push(`    // Relation: ${relation.field} (oneToMany) - populate strategy`);
             lines.push(`    if (include.${relation.field} !== undefined) {`);
+            lines.push(`      const includeOpts = include.${relation.field};`);
+            lines.push(`      let whereFilter = {};`);
+            lines.push(`      let orderBy = null;`);
+            lines.push(`      let take = null;`);
+            lines.push(`      let skip = null;`);
+            lines.push(`      let select = undefined;`);
+            lines.push(`      let nestedInclude = undefined;`);
+            lines.push(`      if (typeof includeOpts === 'object' && includeOpts !== null) {`);
+            lines.push(`        whereFilter = includeOpts.where || {};`);
+            lines.push(`        orderBy = includeOpts.orderBy || null;`);
+            lines.push(`        take = includeOpts.take !== undefined ? includeOpts.take : null;`);
+            lines.push(`        skip = includeOpts.skip !== undefined ? includeOpts.skip : null;`);
+            lines.push(`        select = includeOpts.select;`);
+            lines.push(`        nestedInclude = includeOpts.include;`);
+            lines.push(`      }`);
             // Check foreign key location: if in source, document has array of IDs; if in target, target has foreign key
             if (relation.foreignKeyLocation === 'source') {
               // Foreign key is array of IDs in source document
               lines.push(`      if (document.${relation.foreignKey} && Array.isArray(document.${relation.foreignKey})) {`);
+              lines.push(`        const baseWhere = { id: { in: document.${relation.foreignKey} } };`);
+              lines.push(`        const finalWhere = Object.keys(whereFilter).length > 0 ? { AND: [baseWhere, whereFilter] } : baseWhere;`);
               lines.push(`        const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findMany({`);
-              lines.push(`          where: { id: { in: document.${relation.foreignKey} } },`);
-              lines.push(`          include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`);
+              lines.push(`          where: finalWhere,`);
+              lines.push(`          orderBy: orderBy,`);
+              lines.push(`          take: take,`);
+              lines.push(`          skip: skip,`);
+              lines.push(`          select: select,`);
+              lines.push(`          include: nestedInclude`);
               lines.push(`        })`);
               lines.push(`        result.${relation.field} = ${relation.field}`);
               lines.push(`      } else {`);
@@ -1883,9 +1980,14 @@ export class ${model.name}Delegate {
               lines.push(`      }`);
             } else {
               // Foreign key is single ID in target documents (default)
+              lines.push(`      const baseWhere = { ${relation.foreignKey}: document.id };`);
+              lines.push(`      const finalWhere = Object.keys(whereFilter).length > 0 ? { AND: [baseWhere, whereFilter] } : baseWhere;`);
               lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findMany({`);
-              lines.push(`        where: { ${relation.foreignKey}: document.id },`);
-              lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`);
+              lines.push(`        where: finalWhere,`);
+              lines.push(`        orderBy: orderBy,`);
+              lines.push(`        take: take,`);
+              lines.push(`        skip: skip,`);
+              lines.push(`        include: nestedInclude`);
               lines.push(`      })`);
               lines.push(`      result.${relation.field} = ${relation.field}`);
             }
@@ -1894,9 +1996,21 @@ export class ${model.name}Delegate {
           case 'manyToOne':
             lines.push(`    // Relation: ${relation.field} (manyToOne) - populate strategy`);
             lines.push(`    if (include.${relation.field} !== undefined && document.${relation.foreignKey}) {`);
+            lines.push(`      const includeOpts = include.${relation.field};`);
+            lines.push(`      let whereFilter = {};`);
+            lines.push(`      let select = undefined;`);
+            lines.push(`      let nestedInclude = undefined;`);
+            lines.push(`      if (typeof includeOpts === 'object' && includeOpts !== null) {`);
+            lines.push(`        whereFilter = includeOpts.where || {};`);
+            lines.push(`        select = includeOpts.select;`);
+            lines.push(`        nestedInclude = includeOpts.include;`);
+            lines.push(`      }`);
+            lines.push(`      const baseWhere = { id: document.${relation.foreignKey} };`);
+            lines.push(`      const finalWhere = Object.keys(whereFilter).length > 0 ? { AND: [baseWhere, whereFilter] } : baseWhere;`);
             lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findUnique({`);
-            lines.push(`        where: { id: document.${relation.foreignKey} },`);
-            lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`);
+            lines.push(`        where: finalWhere,`);
+            lines.push(`        select: select,`);
+            lines.push(`        include: nestedInclude`);
             lines.push(`      })`);
             lines.push(`      result.${relation.field} = ${relation.field}`);
             lines.push(`    }`);
@@ -1904,9 +2018,21 @@ export class ${model.name}Delegate {
           case 'oneToOne':
             lines.push(`    // Relation: ${relation.field} (oneToOne) - populate strategy`);
             lines.push(`    if (include.${relation.field} !== undefined && document.${relation.foreignKey}) {`);
+            lines.push(`      const includeOpts = include.${relation.field};`);
+            lines.push(`      let whereFilter = {};`);
+            lines.push(`      let select = undefined;`);
+            lines.push(`      let nestedInclude = undefined;`);
+            lines.push(`      if (typeof includeOpts === 'object' && includeOpts !== null) {`);
+            lines.push(`        whereFilter = includeOpts.where || {};`);
+            lines.push(`        select = includeOpts.select;`);
+            lines.push(`        nestedInclude = includeOpts.include;`);
+            lines.push(`      }`);
+            lines.push(`      const baseWhere = { id: document.${relation.foreignKey} };`);
+            lines.push(`      const finalWhere = Object.keys(whereFilter).length > 0 ? { AND: [baseWhere, whereFilter] } : baseWhere;`);
             lines.push(`      const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findUnique({`);
-            lines.push(`        where: { id: document.${relation.foreignKey} },`);
-            lines.push(`        include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`);
+            lines.push(`        where: finalWhere,`);
+            lines.push(`        select: select,`);
+            lines.push(`        include: nestedInclude`);
             lines.push(`      })`);
             lines.push(`      result.${relation.field} = ${relation.field}`);
             lines.push(`    }`);
@@ -1914,12 +2040,33 @@ export class ${model.name}Delegate {
           case 'manyToMany':
             lines.push(`    // Relation: ${relation.field} (manyToMany) - populate strategy`);
             lines.push(`    if (include.${relation.field} !== undefined) {`);
+            lines.push(`      const includeOpts = include.${relation.field};`);
+            lines.push(`      let whereFilter = {};`);
+            lines.push(`      let orderBy = null;`);
+            lines.push(`      let take = null;`);
+            lines.push(`      let skip = null;`);
+            lines.push(`      let select = undefined;`);
+            lines.push(`      let nestedInclude = undefined;`);
+            lines.push(`      if (typeof includeOpts === 'object' && includeOpts !== null) {`);
+            lines.push(`        whereFilter = includeOpts.where || {};`);
+            lines.push(`        orderBy = includeOpts.orderBy || null;`);
+            lines.push(`        take = includeOpts.take !== undefined ? includeOpts.take : null;`);
+            lines.push(`        skip = includeOpts.skip !== undefined ? includeOpts.skip : null;`);
+            lines.push(`        select = includeOpts.select;`);
+            lines.push(`        nestedInclude = includeOpts.include;`);
+            lines.push(`      }`);
             if (relation.foreignKey) {
               // manyToMany with foreign key array (IDs array) - similar to oneToMany with source foreign key
               lines.push(`      if (document.${relation.foreignKey} && Array.isArray(document.${relation.foreignKey})) {`);
+              lines.push(`        const baseWhere = { id: { in: document.${relation.foreignKey} } };`);
+              lines.push(`        const finalWhere = Object.keys(whereFilter).length > 0 ? { AND: [baseWhere, whereFilter] } : baseWhere;`);
               lines.push(`        const ${relation.field} = await this.client.${this.toCamelCase(relation.target)}.findMany({`);
-              lines.push(`          where: { id: { in: document.${relation.foreignKey} } },`);
-              lines.push(`          include: typeof include.${relation.field} === 'object' ? include.${relation.field} : undefined`);
+              lines.push(`          where: finalWhere,`);
+              lines.push(`          orderBy: orderBy,`);
+              lines.push(`          take: take,`);
+              lines.push(`          skip: skip,`);
+              lines.push(`          select: select,`);
+              lines.push(`          include: nestedInclude`);
               lines.push(`        })`);
               lines.push(`        result.${relation.field} = ${relation.field}`);
               lines.push(`      } else {`);
@@ -1927,14 +2074,29 @@ export class ${model.name}Delegate {
               lines.push(`      }`);
             } else if (relation.joinCollection) {
               // manyToMany with join collection - use RelationResolver
+              // Convert where and orderBy using QueryBuilder
+              lines.push(`      let mongoWhere = {};`);
+              lines.push(`      let mongoSort = null;`);
+              lines.push(`      if (Object.keys(whereFilter).length > 0) {`);
+              lines.push(`        mongoWhere = QueryBuilder.buildWhere(whereFilter);`);
+              lines.push(`      }`);
+              lines.push(`      if (orderBy) {`);
+              lines.push(`        mongoSort = QueryBuilder.buildSort(orderBy);`);
+              lines.push(`      }`);
               lines.push(`      const ${relation.field} = await RelationResolver.resolveManyToMany(`);
               lines.push(`        this.client.$db,`);
               lines.push(`        '${model.collectionName}',`);
               lines.push(`        '${this.toCollectionName(relation.target)}',`);
               lines.push(`        '${relation.joinCollection}',`);
-              lines.push(`        document.id`);
+              lines.push(`        document.id,`);
+              lines.push(`        mongoWhere,`);
+              lines.push(`        mongoSort,`);
+              lines.push(`        take,`);
+              lines.push(`        skip,`);
+              lines.push(`        select`);
               lines.push(`      )`);
               lines.push(`      result.${relation.field} = ${relation.field}`);
+              // Note: nestedInclude not supported for join collection case yet
             } else {
               lines.push(`      console.warn('manyToMany relation ${relation.field} has no foreign key or join collection')`);
               lines.push(`      result.${relation.field} = []`);

@@ -1,6 +1,6 @@
 {
   "name": "@bairock/lenz",
-  "version": "0.0.9",
+  "version": "0.0.11",
   "description": "Lenz ORM for MongoDB with GraphQL SDL - Prisma 7.0 style",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

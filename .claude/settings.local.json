@@ -30,7 +30,10 @@
       "Bash(dir:*)",
       "Bash(npm run type-check:*)",
       "Bash(npm run:*)",
-      "Bash(MONGODB_URI=\"\" node:*)"
+      "Bash(MONGODB_URI=\"\" node:*)",
+      "Bash(npx lenz)",
+      "Bash(npm link)",
+      "Bash(npm link:*)"
     ],
     "deny": [],
     "ask": []
