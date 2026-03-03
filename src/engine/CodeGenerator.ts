@@ -941,6 +941,24 @@ export class QueryBuilder {
         } else {
           filter._id = this.normalizeId(value)
         }
+      } else if (key === 'AND') {
+        // Логический оператор AND
+        if (value !== null && typeof value === 'object') {
+          const conditions = Array.isArray(value) ? value : [value]
+          filter.$and = conditions.map(cond => this.buildWhere(cond))
+        }
+      } else if (key === 'OR') {
+        // Логический оператор OR
+        if (value !== null && typeof value === 'object') {
+          const conditions = Array.isArray(value) ? value : [value]
+          filter.$or = conditions.map(cond => this.buildWhere(cond))
+        }
+      } else if (key === 'NOT') {
+        // Логический оператор NOT
+        if (value !== null && typeof value === 'object') {
+          // NOT может быть объектом условий (массив не поддерживается)
+          filter.$not = this.buildWhere(value)
+        }
       } else if (typeof value === 'object' && value !== null) {
         this.applyOperators(filter, key, value)
       } else {
