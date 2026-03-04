@@ -507,6 +507,33 @@ export default defineConfig({
 })
 ```
 
+### `lenz/lenz.config.js` (for JavaScript projects)
+
+For JavaScript projects, use `lenz.config.js` as an ESM module:
+
+```javascript
+// ESM module - lenz.config.js
+import 'dotenv/config';
+
+export default {
+  schema: 'schema.graphql',
+  datasource: {
+    url: process.env.MONGODB_URI || 'mongodb://localhost:27017',
+    database: process.env.MONGODB_DATABASE || 'myapp',
+  },
+  generate: {
+    client: {
+      output: '../generated/lenz/client',
+      generator: 'lenz-client-js',
+    },
+  },
+  log: ['query', 'info', 'warn', 'error'],
+  autoCreateCollections: true,
+};
+```
+
+> **Note**: Lenz supports only ESM modules for JavaScript projects. The `lenz init` command automatically detects your project type (TypeScript or JavaScript) and creates the appropriate config file (`lenz.config.ts` for TypeScript, `lenz.config.js` for JavaScript). JavaScript config files must use ESM syntax (`export default`).
+
 ## GraphQL Directives
 
 Lenz extends GraphQL with custom directives:
@@ -842,8 +869,8 @@ npx lenz init
 # Generate client
 npx lenz generate
 
-# Generate with custom config
-npx lenz generate --config lenz/lenz.config.js
+# Generate with custom config (use .ts for TypeScript, .js for JavaScript)
+npx lenz generate --config lenz/lenz.config.ts
 
 # Show help
 npx lenz --help
@@ -855,7 +882,7 @@ npx lenz --help
 my-app/
 ├── lenz/
 │   ├── schema.graphql          # Your GraphQL schema
-│   └── lenz.config.ts          # Configuration
+│   └── lenz.config.ts|js       # Configuration (TypeScript or JavaScript ESM)
 ├── generated/
 │   └── lenz/
 │       └── client/             # Generated client

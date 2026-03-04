@@ -22,7 +22,19 @@ export const generateCommand = new Command('generate')
 
     try {
       let config: any = {};
-      const configPath = resolve(process.cwd(), options.config!);
+
+      // Автоматически определяем конфиг по типу проекта, если используется значение по умолчанию
+      let configFile = options.config!;
+      if (configFile === 'lenz/lenz.config.ts') {
+        const tsConfigPath = resolve(process.cwd(), 'lenz/lenz.config.ts');
+        const jsConfigPath = resolve(process.cwd(), 'lenz/lenz.config.js');
+        if (!existsSync(tsConfigPath) && existsSync(jsConfigPath)) {
+          configFile = 'lenz/lenz.config.js';
+          console.log(chalk.gray(`📦 Using JavaScript config: ${configFile}`));
+        }
+      }
+
+      const configPath = resolve(process.cwd(), configFile);
 
       // Загружаем конфигурацию
       if (existsSync(configPath)) {
@@ -30,9 +42,9 @@ export const generateCommand = new Command('generate')
           // Для TypeScript конфига
           const configModule = await import(configPath);
           config = configModule.default || configModule;
-        } else if (configPath.endsWith('.js')) {
-          // Для JavaScript конфига
-          const configModule = require(configPath);
+        } else if (configPath.endsWith('.js') || configPath.endsWith('.mjs')) {
+          // Для JavaScript конфига (только ESM)
+          const configModule = await import(configPath);
           config = configModule.default || configModule;
         }
       } else {

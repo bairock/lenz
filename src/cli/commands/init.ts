@@ -56,6 +56,24 @@ export default defineConfig({
   autoCreateCollections: true,
 })`;
 
+const DEFAULT_CONFIG_JS = `import 'dotenv/config'
+
+export default {
+  schema: 'schema.graphql',
+  datasource: {
+    url: process.env.MONGODB_URI || 'mongodb://localhost:27017',
+    database: process.env.MONGODB_DATABASE || 'myapp',
+  },
+  generate: {
+    client: {
+      output: '../generated/lenz/client',
+      generator: 'lenz-client-js',
+    },
+  },
+  log: ['query', 'info', 'warn', 'error'],
+  autoCreateCollections: true,
+};`;
+
 
 const EXAMPLE_ENV = `# MongoDB connection string
 MONGODB_URI=mongodb://localhost:27017
@@ -105,6 +123,13 @@ export const initCommand = new Command('init')
       }
     }
 
+    // Определяем тип проекта (TypeScript или JavaScript)
+    const isTypeScriptProject = existsSync('tsconfig.json');
+    const configExtension = isTypeScriptProject ? 'ts' : 'js';
+    const configTemplate = isTypeScriptProject ? DEFAULT_CONFIG_TS : DEFAULT_CONFIG_JS;
+
+    console.log(chalk.gray(`📦 Detected ${isTypeScriptProject ? 'TypeScript' : 'JavaScript (ESM)'} project`));
+
     // Создаем файлы
     const files = [
       {
@@ -112,9 +137,9 @@ export const initCommand = new Command('init')
         content: answers.createExample ? DEFAULT_SCHEMA : '# Your GraphQL schema here'
       },
       {
-        path: 'lenz/lenz.config.ts',
-        content: DEFAULT_CONFIG_TS.replace('myapp', answers.database || 'myapp')
-                                 .replace('mongodb://localhost:27017', answers.url || 'mongodb://localhost:27017')
+        path: `lenz/lenz.config.${configExtension}`,
+        content: configTemplate.replace('myapp', answers.database || 'myapp')
+                               .replace('mongodb://localhost:27017', answers.url || 'mongodb://localhost:27017')
       },
       {
         path: '.env.example',
@@ -142,6 +167,7 @@ generated/
     console.log(chalk.green('\n✅ Lenz project initialized!'));
     console.log(chalk.gray('\nNext steps:'));
     console.log(chalk.white('  1. Edit your schema: ') + chalk.cyan('lenz/schema.graphql'));
-    console.log(chalk.white('  2. Generate client: ') + chalk.cyan('npx lenz generate'));
-    console.log(chalk.white('  3. Start coding! 🚀\n'));
+    console.log(chalk.white('  2. Configure database: ') + chalk.cyan(`lenz/lenz.config.${configExtension}`));
+    console.log(chalk.white('  3. Generate client: ') + chalk.cyan('npx lenz generate'));
+    console.log(chalk.white('  4. Start coding! 🚀\n'));
   });
