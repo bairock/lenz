@@ -38,18 +38,16 @@ type Post @model {
 # @updatedAt - Auto-updates timestamp`;
 
 const DEFAULT_CONFIG_TS = `import 'dotenv/config'
-import { defineConfig } from 'lenz/config'
+import { defineConfig } from '@bairock/lenz'
 
 export default defineConfig({
   schema: 'schema.graphql',
   datasource: {
-    url: process.env.MONGODB_URI,
-    database: process.env.MONGODB_DATABASE || 'myapp',
+    url: process.env.MONGODB_URI || 'mongodb://localhost:27017/myapp',
   },
   generate: {
     client: {
       output: '../generated/lenz/client',
-      generator: 'lenz-client-js',
     },
   },
   log: ['query', 'info', 'warn', 'error'] as const,
@@ -57,29 +55,25 @@ export default defineConfig({
 })`;
 
 const DEFAULT_CONFIG_JS = `import 'dotenv/config'
+import { defineConfig } from '@bairock/lenz'
 
-export default {
+export default defineConfig({
   schema: 'schema.graphql',
   datasource: {
-    url: process.env.MONGODB_URI || 'mongodb://localhost:27017',
-    database: process.env.MONGODB_DATABASE || 'myapp',
+    url: process.env.MONGODB_URI || 'mongodb://localhost:27017/myapp',
   },
   generate: {
     client: {
       output: '../generated/lenz/client',
-      generator: 'lenz-client-js',
     },
   },
   log: ['query', 'info', 'warn', 'error'],
   autoCreateCollections: true,
-};`;
+});`;
 
 
-const EXAMPLE_ENV = `# MongoDB connection string
-MONGODB_URI=mongodb://localhost:27017
-
-# Database name
-MONGODB_DATABASE=myapp
+const EXAMPLE_ENV = `# MongoDB connection string (include database name in URL)
+MONGODB_URI=mongodb://localhost:27017/myapp
 
 # Log level (debug, info, warn, error)
 LOG_LEVEL=info
@@ -96,15 +90,9 @@ export const initCommand = new Command('init')
     const answers = options.skipPrompts ? {} : await inquirer.prompt([
       {
         type: 'input',
-        name: 'database',
-        message: 'Database name:',
-        default: 'myapp'
-      },
-      {
-        type: 'input',
         name: 'url',
-        message: 'MongoDB URL:',
-        default: 'mongodb://localhost:27017'
+        message: 'MongoDB URL (include database name):',
+        default: 'mongodb://localhost:27017/myapp'
       },
       {
         type: 'confirm',
@@ -138,8 +126,7 @@ export const initCommand = new Command('init')
       },
       {
         path: `lenz/lenz.config.${configExtension}`,
-        content: configTemplate.replace('myapp', answers.database || 'myapp')
-                               .replace('mongodb://localhost:27017', answers.url || 'mongodb://localhost:27017')
+        content: configTemplate.replace('mongodb://localhost:27017/myapp', answers.url || 'mongodb://localhost:27017/myapp')
       },
       {
         path: '.env.example',

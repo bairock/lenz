@@ -7,10 +7,8 @@ export interface LenzConfig {
   schema?: string;
   /** Data source configuration */
   datasource?: {
-    /** MongoDB connection URL */
+    /** MongoDB connection URL (include database name in URL, e.g., mongodb://localhost:27017/mydb) */
     url?: string;
-    /** Database name */
-    database?: string;
   };
   /** Generation configuration */
   generate?: {
@@ -38,7 +36,34 @@ export interface LenzConfig {
  * Define a Lenz configuration
  */
 export function defineConfig(config: LenzConfig): LenzConfig {
-  return config;
+  const result: LenzConfig = {
+    ...defaultConfig,
+    ...config,
+  };
+
+  // Deep merge for datasource
+  if (config.datasource) {
+    result.datasource = {
+      ...defaultConfig.datasource,
+      ...config.datasource,
+    };
+  }
+
+  // Deep merge for generate
+  if (config.generate) {
+    result.generate = {
+      ...defaultConfig.generate,
+      ...config.generate,
+    };
+    if (config.generate.client) {
+      result.generate.client = {
+        ...defaultConfig.generate?.client,
+        ...config.generate.client,
+      };
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -54,13 +79,11 @@ export function env(key: string, defaultValue?: string): string {
 export const defaultConfig: LenzConfig = {
   schema: 'schema.graphql',
   datasource: {
-    url: 'mongodb://localhost:27017',
-    database: 'myapp'
+    url: 'mongodb://localhost:27017/myapp',
   },
   generate: {
     client: {
       output: '../generated/lenz/client',
-      generator: 'lenz-client-js',
     }
   },
   log: ['query', 'error', 'warn'],

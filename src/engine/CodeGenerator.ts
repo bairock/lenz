@@ -324,19 +324,39 @@ export class ${clientName} {
   private mongoClient: MongoClient | null = null
   private db: Db | null = null
   private config: LenzConfig
+  private database: string
   private supportsTransactions: boolean = false
 
   // Model delegates
 ${models.map(model => `  public ${this.toCamelCase(model.name)}: ${model.name}Delegate`).join('\n')}
 
+  private extractDatabaseFromUrl(url: string): string {
+    // Extract database name from MongoDB URL
+    // Format: mongodb://host:port/database?options or mongodb+srv://host/database?options
+    try {
+      const parts = url.split('://');
+      if (parts.length < 2) return 'myapp';
+      const afterProtocol = parts[1];
+      const slashIndex = afterProtocol.indexOf('/');
+      if (slashIndex === -1) return 'myapp';
+      const afterSlash = afterProtocol.substring(slashIndex + 1);
+      const questionIndex = afterSlash.indexOf('?');
+      const database = questionIndex === -1 ? afterSlash : afterSlash.substring(0, questionIndex);
+      return database || 'myapp';
+    } catch {
+      return 'myapp';
+    }
+  }
+
   constructor(config: LenzConfig = {}) {
+    const url = config.url || process.env.MONGODB_URI || 'mongodb://localhost:27017/myapp';
     this.config = {
-      url: config.url || process.env.MONGODB_URI || 'mongodb://localhost:27017',
-      database: config.database || 'myapp',
+      url,
       autoCreateCollections: config.autoCreateCollections ?? true,
       log: config.log || [],
       ...config
-    }
+    };
+    this.database = config.database || this.extractDatabaseFromUrl(url);
 
     // Initialize model delegates
 ${models.map(model => `    this.${this.toCamelCase(model.name)} = new ${model.name}Delegate(this)`).join('\n')}
@@ -354,7 +374,7 @@ ${models.map(model => `    this.${this.toCamelCase(model.name)} = new ${model.na
     })
 
     await this.mongoClient.connect()
-    this.db = this.mongoClient.db(this.config.database)
+    this.db = this.mongoClient.db(this.database)
 
     // Test connection
     await this.db.command({ ping: 1 })
@@ -642,7 +662,6 @@ export interface CursorPaginatedResult<T> {
 // Config types
 export interface LenzConfig {
   url?: string
-  database?: string
   schemaPath?: string
   log?: ('query' | 'error' | 'warn' | 'info')[]
   autoCreateCollections?: boolean

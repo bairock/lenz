@@ -33,7 +33,8 @@
       "Bash(MONGODB_URI=\"\" node:*)",
       "Bash(npx lenz)",
       "Bash(npm link)",
-      "Bash(npm link:*)"
+      "Bash(npm link:*)",
+      "Bash(npx lenz --help:*)"
     ],
     "deny": [],
     "ask": []
