@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { LenzEngine } from '../../engine/LenzEngine';
+import { LenzEngine } from '../../engine/LenzEngine.js';
 import { existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import chalk from 'chalk';

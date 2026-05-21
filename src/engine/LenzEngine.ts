@@ -1,5 +1,5 @@
-import { GraphQLParser } from './GraphQLParser';
-import { CodeGenerator, GenerateOptions as CodeGenOptions } from './CodeGenerator';
+import { GraphQLParser } from './GraphQLParser.js';
+import { CodeGenerator, GenerateOptions as CodeGenOptions } from './CodeGenerator.js';
 import { promises as fs, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import chalk from 'chalk';
@@ -8,7 +8,7 @@ import {
   SchemaParseError,
   CodeGenerationError,
   ConfigurationError
-} from '../errors';
+} from '../errors/index.js';
 
 export interface GenerateOptions {
   schemaPath: string;

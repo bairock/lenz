@@ -489,9 +489,6 @@ import { defineConfig } from 'lenz/config'
 
 export default defineConfig({
   schema: 'schema.graphql',
-  migrations: {
-    path: 'migrations',
-  },
   datasource: {
     url: process.env.MONGODB_URI,
     database: process.env.MONGODB_DATABASE || 'myapp',
@@ -543,7 +540,7 @@ Lenz extends GraphQL with custom directives:
 - `@unique` - Creates a unique index
 - `@index` - Creates a regular index
 - `@default(value: "...")` - Sets default value
-- `@relation(field: "...", strategy: "populate|lookup", index: true|false)` - Defines relation with loading strategy and index control
+- `@relation(field: "...", strategy: "populate|lookup", index: true|false, onDelete: "NoAction|Cascade|SetNull")` - Defines relation with loading strategy, index control, and cascade delete behavior (default: `NoAction`)
 - `@createdAt` - Auto-sets creation timestamp
 - `@updatedAt` - Auto-updates timestamp
 - `@embedded` - Marks a type as embedded document
@@ -761,6 +758,36 @@ type Category @model {
   posts: [Post!]! @relation
 }
 ```
+
+### Cascade Delete Behavior (`onDelete`)
+
+Lenz supports cascade delete operations on relations. By default, **no cascade is performed** (`onDelete: "NoAction"`) for performance and safety. You must explicitly opt in.
+
+| Value | Behavior |
+|-------|----------|
+| `NoAction` (default) | No cascade. Deleted document's related references become orphaned. |
+| `Cascade` | When a document is deleted, all related documents are also deleted. |
+| `SetNull` | When a document is deleted, foreign key fields in related documents are set to `null` (only for nullable FK fields). |
+
+**Important:** Cascade operations negatively impact write performance because each delete triggers additional queries. Use only when necessary.
+
+Examples:
+
+```graphql
+type Author @model {
+  id: ID! @id
+  posts: [Post!]! @relation(field: "postIds", onDelete: "Cascade")  # Deletes all posts when author is deleted
+  postIds: [ID!]!
+}
+
+type Profile @model {
+  id: ID! @id
+  user: User @relation(field: "userId", onDelete: "SetNull")  # Sets userId to null when user is deleted
+  userId: ID
+}
+```
+
+**Note:** `onDelete: "SetNull"` is only supported on nullable foreign key fields (optional `ID` fields, not `ID!`). Using it on required fields will cause a validation error.
 
 ### Automatic Indexing
 

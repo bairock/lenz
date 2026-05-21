@@ -52,6 +52,10 @@ export const relationDirective = new GraphQLDirective({
     index: {
       type: GraphQLBoolean,
       description: 'Whether to create an index on the foreign key field (default: true)'
+    },
+    onDelete: {
+      type: GraphQLString,
+      description: 'Cascade delete behavior: "Cascade" (delete related), "SetNull" (nullify FK), or "NoAction" (default, no cascade)'
     }
   },
   description: 'Defines a relationship between models'

@@ -1,17 +1,17 @@
 // Main exports
-export { LenzEngine } from './engine/LenzEngine';
-export * from './config';
+export { LenzEngine } from './engine/LenzEngine.js';
+export * from './config/index.js';
 
 // CLI commands
-import { generateCommand } from './cli/commands/generate';
-import { initCommand } from './cli/commands/init';
-import { studioCommand } from './cli/commands/studio';
+import { generateCommand } from './cli/commands/generate.js';
+import { initCommand } from './cli/commands/init.js';
+import { studioCommand } from './cli/commands/studio.js';
 
 // Types
-export * from './engine/GraphQLParser';
+export * from './engine/GraphQLParser.js';
 
 // Default export
-import { LenzEngine as LenzEngineClass } from './engine/LenzEngine';
+import { LenzEngine as LenzEngineClass } from './engine/LenzEngine.js';
 export default {
   LenzEngine: LenzEngineClass,
   generate: generateCommand,

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { generateCommand } from './commands/generate';
-import { initCommand } from './commands/init';
-import { studioCommand } from './commands/studio';
+import { generateCommand } from './commands/generate.js';
+import { initCommand } from './commands/init.js';
+import { studioCommand } from './commands/studio.js';
 import chalk from 'chalk';
 import figlet from 'figlet';
 

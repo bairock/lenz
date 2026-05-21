@@ -3,7 +3,7 @@ import {
   GraphQLEnum,
   ModelRelation,
   GraphQLField
-} from './GraphQLParser';
+} from './GraphQLParser.js';
 import {
   SchemaValidationError,
   CircularDependencyError,
@@ -12,8 +12,8 @@ import {
   InvalidFieldTypeError,
   InvalidDirectiveError,
   RelationValidationError
-} from '../errors';
-import { isLenzDirective, getDirectiveDefinition } from './directives';
+} from '../errors/index.js';
+import { isLenzDirective, getDirectiveDefinition } from './directives.js';
 
 export interface ValidationOptions {
   /** Whether to check for circular dependencies (default: true) */
@@ -484,6 +484,30 @@ export class SchemaValidator {
           `Invalid index value '${relation.index}' for relation '${relation.field}' -> '${relation.target}'. ` +
           `Must be a boolean.`
         );
+      }
+
+      // Validate onDelete
+      if (relation.onDelete && !['Cascade', 'SetNull', 'NoAction'].includes(relation.onDelete)) {
+        throw new SchemaValidationError(
+          `Invalid onDelete value '${relation.onDelete}' for relation '${relation.field}' -> '${relation.target}'. ` +
+          `Must be 'Cascade', 'SetNull', or 'NoAction'.`
+        );
+      }
+
+      // Validate SetNull requires nullable FK
+      if (relation.onDelete === 'SetNull' && relation.foreignKey) {
+        const sourceModel = this.models.find(m =>
+          m.relations.some(r => r.field === relation.field && r.target === relation.target)
+        );
+        if (sourceModel) {
+          const fkField = sourceModel.fields.find(f => f.name === relation.foreignKey);
+          if (fkField && fkField.isRequired) {
+            throw new SchemaValidationError(
+              `onDelete: SetNull on relation '${relation.field}' -> '${relation.target}' requires a nullable foreign key field. ` +
+              `Field '${relation.foreignKey}' in '${sourceModel.name}' is required.`
+            );
+          }
+        }
       }
 
       // Validate lookup strategy requirements

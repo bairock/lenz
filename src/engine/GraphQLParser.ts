@@ -1,7 +1,7 @@
 import { parse, DocumentNode, ObjectTypeDefinitionNode, TypeNode, EnumTypeDefinitionNode, FieldDefinitionNode } from 'graphql';
-import { SchemaValidator } from './SchemaValidator';
-import { SchemaParseError } from '../errors';
-import { lenzDirectives } from './directives';
+import { SchemaValidator } from './SchemaValidator.js';
+import { SchemaParseError } from '../errors/index.js';
+import { lenzDirectives } from './directives.js';
 
 export interface GraphQLField {
   name: string;
@@ -19,6 +19,7 @@ export interface GraphQLField {
   defaultValue?: any;
   relationStrategy?: 'populate' | 'lookup';
   relationIndex?: boolean;
+  onDelete: 'Cascade' | 'SetNull' | 'NoAction';
 }
 
 export interface GraphQLModel {
@@ -40,6 +41,7 @@ export interface ModelRelation {
   strategy: 'populate' | 'lookup';
   index: boolean;
   isForeignKeyArray: boolean;
+  onDelete: 'Cascade' | 'SetNull' | 'NoAction';
 }
 
 export interface ModelIndex {
@@ -145,7 +147,8 @@ export class GraphQLParser {
             defaultValue: this.getDefaultValue(fieldDirectives, field),
             foreignKey: relationData.field ?? this.getRelationField(fieldDirectives, field),
             relationStrategy: relationData.strategy ?? 'populate',
-            relationIndex: relationData.index ?? true
+            relationIndex: relationData.index ?? true,
+            onDelete: relationData.onDelete ?? 'NoAction'
           };
 
           fields.push(graphQLField);
@@ -209,9 +212,10 @@ export class GraphQLParser {
   private parseRelationDirective(fieldNode: FieldDefinitionNode): {
     field?: string;
     strategy?: 'populate' | 'lookup';
-    index?: boolean
+    index?: boolean;
+    onDelete: 'Cascade' | 'SetNull' | 'NoAction';
   } {
-    const result: { field?: string; strategy?: 'populate' | 'lookup'; index?: boolean } = {};
+    const result: { field?: string; strategy?: 'populate' | 'lookup'; index?: boolean; onDelete: 'Cascade' | 'SetNull' | 'NoAction' } = { onDelete: 'NoAction' };
     const relationDirective = fieldNode.directives?.find(d => d.name.value === 'relation');
     if (relationDirective?.arguments) {
       for (const arg of relationDirective.arguments) {
@@ -223,6 +227,10 @@ export class GraphQLParser {
           }
         } else if (arg.name.value === 'index' && arg.value.kind === 'BooleanValue') {
           result.index = arg.value.value;
+        } else if (arg.name.value === 'onDelete' && arg.value.kind === 'StringValue') {
+          if (arg.value.value === 'Cascade' || arg.value.value === 'SetNull' || arg.value.value === 'NoAction') {
+            result.onDelete = arg.value.value;
+          }
         }
       }
     }
@@ -414,7 +422,8 @@ export class GraphQLParser {
       joinCollection,
       strategy: field.relationStrategy ?? defaultStrategy,
       index: field.relationIndex ?? true,
-      isForeignKeyArray
+      isForeignKeyArray,
+      onDelete: field.onDelete ?? 'NoAction'
     };
 
     return relation;
