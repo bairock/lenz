@@ -110,7 +110,11 @@ export class GraphQLParser {
     const objectTypes = this.ast.definitions.filter(
       (def): def is ObjectTypeDefinitionNode =>
         def.kind === 'ObjectTypeDefinition' &&
-        !['Query', 'Mutation', 'Subscription'].includes(def.name.value)
+        !['Query', 'Mutation', 'Subscription'].includes(def.name.value) &&
+        (
+          (def.directives?.some(d => d.name.value === 'model') ?? false) ||
+          (def.directives?.some(d => d.name.value === 'embedded') ?? false)
+        )
     );
 
     // Собираем имена всех моделей для определения отношений
@@ -153,18 +157,20 @@ export class GraphQLParser {
 
           fields.push(graphQLField);
 
-          if (fieldDirectives.includes('unique')) {
-            indexes.push({
-              fields: [field.name.value],
-              unique: true
-            });
-          }
+          if (!isEmbedded) {
+            if (fieldDirectives.includes('unique') && !fieldDirectives.includes('id')) {
+              indexes.push({
+                fields: [field.name.value],
+                unique: true
+              });
+            }
 
-          if (fieldDirectives.includes('index')) {
-            indexes.push({
-              fields: [field.name.value],
-              unique: false
-            });
+            if (fieldDirectives.includes('index')) {
+              indexes.push({
+                fields: [field.name.value],
+                unique: false
+              });
+            }
           }
         }
       }
@@ -476,7 +482,7 @@ export class GraphQLParser {
     );
     validator.validate({
       validateRelations: true,
-      checkCircularDependencies: false  // Disabled because circular dependencies are allowed in relationships
+      checkCircularDependencies: true
     });
 
     // Log warnings

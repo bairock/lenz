@@ -2,6 +2,8 @@
  * Lenz configuration utilities
  */
 
+import { ConfigurationError } from '../errors/index.js';
+
 export interface LenzConfig {
   /** Path to GraphQL schema file */
   schema?: string;
@@ -9,6 +11,8 @@ export interface LenzConfig {
   datasource?: {
     /** MongoDB connection URL (include database name in URL, e.g., mongodb://localhost:27017/mydb) */
     url?: string;
+    /** Database name (overrides database name from URL) */
+    database?: string;
   };
   /** Generation configuration */
   generate?: {
@@ -16,8 +20,6 @@ export interface LenzConfig {
     client?: {
       /** Output directory for generated client */
       output?: string;
-      /** Generator name */
-      generator?: string;
     };
   };
   /** Logging levels */
@@ -33,9 +35,27 @@ export interface LenzConfig {
 }
 
 /**
- * Define a Lenz configuration
+ * Define a Lenz configuration with validation
  */
 export function defineConfig(config: LenzConfig): LenzConfig {
+  // Validate config
+  if (config.schema !== undefined && typeof config.schema !== 'string') {
+    throw new ConfigurationError('schema must be a string', { schema: config.schema });
+  }
+  if (config.datasource?.url !== undefined && typeof config.datasource.url !== 'string') {
+    throw new ConfigurationError('datasource.url must be a string', { url: config.datasource.url });
+  }
+  if (config.log !== undefined) {
+    const validLevels = ['query', 'info', 'warn', 'error'];
+    for (const level of config.log) {
+      if (!validLevels.includes(level)) {
+        throw new ConfigurationError(`Invalid log level '${level}'. Must be one of: ${validLevels.join(', ')}`, { level });
+      }
+    }
+  }
+  if (config.maxPoolSize !== undefined && (typeof config.maxPoolSize !== 'number' || config.maxPoolSize < 1)) {
+    throw new ConfigurationError('maxPoolSize must be a positive number', { maxPoolSize: config.maxPoolSize });
+  }
   const result: LenzConfig = {
     ...defaultConfig,
     ...config,

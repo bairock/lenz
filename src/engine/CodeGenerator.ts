@@ -31,7 +31,8 @@ export class CodeGenerator {
           module: ts.ModuleKind.ESNext,
           removeComments: false,
           preserveConstEnums: true,
-          sourceMap: false,
+          sourceMap: true,
+          inlineSourceMap: true,
           declaration: false,
           strict: false,
           esModuleInterop: true,
@@ -257,18 +258,19 @@ export class CodeGenerator {
 
   generate(options: GenerateOptions): GeneratedFiles {
     const { models, enums, clientName = 'LenzClient' } = options;
+    const nonEmbeddedModels = models.filter(m => !m.isEmbedded);
 
     const files: GeneratedFiles = {
       'index.ts': this.generateIndex(clientName),
-      'client.ts': this.generateClient(clientName, models),
+      'client.ts': this.generateClient(clientName, nonEmbeddedModels),
       'types.ts': this.generateTypes(models, enums),
       'enums.ts': this.generateEnums(enums),
       'runtime/index.ts': this.generateRuntimeIndex(),
       'runtime/query.ts': this.generateRuntimeQuery(),
       'runtime/pagination.ts': this.generateRuntimePagination(),
       'runtime/relations.ts': this.generateRuntimeRelations(),
-      'models/index.ts': this.generateModelsIndex(models),
-      ...this.generateModelFiles(models)
+      'models/index.ts': this.generateModelsIndex(nonEmbeddedModels),
+      ...this.generateModelFiles(nonEmbeddedModels)
     };
 
     const result: GeneratedFiles = {};

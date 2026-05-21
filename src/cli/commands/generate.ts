@@ -3,6 +3,7 @@ import { LenzEngine } from '../../engine/LenzEngine.js';
 import { existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import chalk from 'chalk';
+import { ConfigurationError } from '../../errors/index.js';
 
 interface GenerateOptions {
   schema?: string;
@@ -58,9 +59,10 @@ export const generateCommand = new Command('generate')
       );
 
       if (!existsSync(schemaPath)) {
-        console.log(chalk.red(`❌ Schema file not found: ${schemaPath}`));
-        console.log(chalk.yellow('💡 Try running: lenz init'));
-        process.exit(1);
+        throw new ConfigurationError(
+          `Schema file not found: ${schemaPath}. Try running: lenz init`,
+          { schemaPath }
+        );
       }
 
       const outputPath = resolve(
@@ -98,6 +100,9 @@ export const generateCommand = new Command('generate')
     } catch (error) {
       console.log(chalk.red('❌ Generation failed:'));
       console.log(chalk.red(error instanceof Error ? error.message : String(error)));
+      if (typeof error === 'object' && error !== null && 'details' in error) {
+        console.log(chalk.gray('   Details:', JSON.stringify((error as any).details, null, 2)));
+      }
       process.exit(1);
     }
   });

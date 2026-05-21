@@ -3,7 +3,6 @@
 import { Command } from 'commander';
 import { generateCommand } from './commands/generate.js';
 import { initCommand } from './commands/init.js';
-import { studioCommand } from './commands/studio.js';
 import chalk from 'chalk';
 import figlet from 'figlet';
 
@@ -19,7 +18,6 @@ program
 
 program.addCommand(initCommand);
 program.addCommand(generateCommand);
-program.addCommand(studioCommand);
 
 if (process.argv.length === 2) {
   console.log(chalk.cyan(figlet.textSync('Lenz', { horizontalLayout: 'full' })));

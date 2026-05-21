@@ -199,15 +199,6 @@ export class SchemaValidator {
   private validateFieldDirectives(modelName: string, field: GraphQLField): void {
     const directives = field.directives;
 
-    // Check for conflicting directives
-    if (directives.includes('id') && directives.includes('unique')) {
-      throw new InvalidDirectiveError(
-        'unique',
-        `field '${field.name}' in model '${modelName}'`,
-        { reason: 'Cannot have both @id and @unique directives on the same field' }
-      );
-    }
-
     // Validate @hide directive
     if (directives.includes('hide')) {
       if (directives.includes('id')) {
@@ -427,6 +418,7 @@ export class SchemaValidator {
    */
   private validateRequiredFields(): void {
     for (const model of this.models) {
+      if (model.isEmbedded) continue;
       for (const field of model.fields) {
         if (field.isRequired && !field.isId && !field.defaultValue) {
           // Check if it's a relation field (relations can be required but handled differently)
@@ -546,6 +538,7 @@ export class SchemaValidator {
     const warnings: string[] = [];
 
     for (const model of this.models) {
+      if (model.isEmbedded) continue;
       // Warn about models without @id field
       const hasIdField = model.fields.some(f => f.isId);
       if (!hasIdField) {
