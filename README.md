@@ -14,6 +14,94 @@ GraphQL-based ORM for MongoDB (Prisma style)
 - ✅ **Automatic Indexing** - Intelligent index creation for foreign key fields
 - ✅ **Transactions** - ACID transactions with MongoDB
 
+## Сравнение с Prisma
+
+Lenz вдохновлён Prisma, но имеет важные отличия, связанные с MongoDB. Ниже — подробное сравнение.
+
+### Таблица директив
+
+| Prisma атрибут | Lenz директива | Статус |
+|---------------|----------------|--------|
+| `@id` | `@id` | ✅ Полная поддержка (ObjectId) |
+| `@unique` | `@unique` | ✅ Полная поддержка |
+| `@index` | `@index` | ✅ Полная поддержка |
+| `@default(value)` | `@default(value: "...")` | ✅ Полная поддержка |
+| `@default(uuid())` | `@default(generator: "uuid")` | ✅ Эквивалент |
+| `@default(now())` | `@default(generator: "now")` | ✅ Эквивалент |
+| `@default(cuid())` | `@default(generator: "cuid")` | ✅ Базовый CUID |
+| `@default(cuid2())` | `@default(generator: "cuid2")` | ✅ CUID2-совместимый |
+| `@default(autoincrement())` | — | ❌ Не применимо к MongoDB |
+| `@default(dbgenerated())` | — | ❌ Не применимо |
+| `@relation(fields, references)` | `@relation(field)` | ⚠️ Упрощённый синтаксис (одно поле) |
+| `@updatedAt` | `@updatedAt` | ✅ Полная поддержка |
+| `@map` | `@map(name)` | ✅ Полная поддержка |
+| `@@map` | `@modelMap(name)` | ✅ Полная поддержка |
+| `@ignore` | `@ignore` | ✅ Полная поддержка |
+| `@hidden` | `@hide` | ✅ Аналог |
+| `@@unique([a, b])` | `@compoundUnique(fields: [...])` | ✅ Полная поддержка |
+| `@@index([a, b])` | `@compoundIndex(fields: [...])` | ✅ Полная поддержка |
+| `@@id([a, b])` | `@compoundId(fields: [...])` | ✅ Полная поддержка |
+| `@@index([...], type: "text")` | `@fulltext(fields: [...])` | ✅ Эквивалент (MongoDB text index) |
+| `@email` | `@email` | ✅ Полная поддержка |
+| `@url` | `@url` | ✅ Полная поддержка |
+| `@@index(map: "...")` | `@compoundIndex(fields: [...], name: "...")` | ✅ name аргумент |
+| `@id(map: "...")` | `@id(map: "...")` | ✅ Полная поддержка |
+| `@unique(map: "...")` | `@unique(map: "...")` | ✅ Полная поддержка |
+| `@@schema` | — | ❌ Не применимо (multi-schema) |
+| `@@view` | — | ❌ Не реализован |
+| `@relation(onDelete: Restrict)` | `@relation(onDelete: "Restrict")` | ✅ Полная поддержка |
+| `@embedded` (Prisma MongoDB) | `@embedded` | ✅ Полная поддержка |
+| — | `@regex(pattern)` | ✅ Только в Lenz |
+| — | `@@fulltext` | ✅ Только в Lenz (MongoDB text index) |
+
+### Возможности
+
+| Возможность | Prisma | Lenz |
+|------------|--------|------|
+| **Поддерживаемые БД** | PostgreSQL, MySQL, SQLite, MongoDB, SQL Server, CockroachDB | **MongoDB** |
+| **CLI генерация** | `prisma generate` | `lenz generate` |
+| **Schema DSL** | Prisma Schema Language (.prisma) | GraphQL SDL (.graphql) |
+| **Типизация** | Полная (генерация типов) | Полная (генерация типов) |
+| **CRUD** | ✅ | ✅ |
+| **Relations (1:1, 1:m, m:n)** | ✅ | ✅ |
+| **Pagination (offset + cursor)** | ✅ | ✅ |
+| **Transactions** | ✅ | ✅ (требуется replica set) |
+| **Aggregation** | `groupBy`, `aggregate` | Пайплайн MongoDB + `aggregate` |
+| **Raw queries** | `$queryRaw`, `$executeRaw` | `$raw`, `aggregateRaw` |
+| **Client extensions** | `$extends` | `$extends` |
+| **Middleware** | `$use` (удалён в Prisma 6.14) | ❌ (используйте `$extends`) |
+| **Миграции** | Prisma Migrate | ❌ (ленивое создание коллекций) |
+| **Интроспекция** | `prisma db pull` | ❌ |
+| **Seed** | `prisma db seed` | ❌ |
+| **Studio** | Prisma Studio | ❌ |
+| **Драйверы** | Встроенные + driver adapters | MongoDB Native Driver |
+| **Views** | `@@view` (v5+) | ❌ |
+| **Multi-schema** | `@@schema` (PostgreSQL) | ❌ |
+
+### Чего нет в Lenz (но есть в Prisma)
+
+1. **Другие БД** — Lenz поддерживает только MongoDB. Prisma работает с PostgreSQL, MySQL, SQLite, SQL Server, CockroachDB и MongoDB.
+2. **Миграции** — нет аналога Prisma Migrate. Коллекции и индексы создаются лениво при первом подключении.
+3. **Интроспекция** — нет `prisma db pull` для импорта схемы из существующей БД.
+4. **Типы данных** — `Decimal`, `Unsupported("...")` не реализованы. `Bytes` и `BigInt` ✅ реализованы.
+5. **Views** — нет поддержки представлений (`@@view`).
+6. **Seed** — нет встроенного фреймворка для наполнения тестовыми данными.
+7. **Studio** — нет графического редактора данных (аналога Prisma Studio).
+8. **Составные внешние ключи** — `@relation` поддерживает только одно поле, не `fields: [a, b], references: [c, d]`.
+
+### Что есть в Lenz, чего нет в Prisma
+
+1. **`@embedded`** — встроенные документы (MongoDB-специфичная возможность).
+2. **`@hide`** — исключение полей из результатов по умолчанию.
+3. **`@regex(pattern)`** — кастомная валидация через регулярные выражения.
+4. **Стратегии загрузки** — автоматический выбор между `populate` (отдельные запросы) и `lookup` (`$lookup` aggregation) в зависимости от типа связи.
+5. **Гео-пространственные фильтры** — `near`, `nearSphere`, `geoWithin`, `geoIntersects`.
+6. **Атомарные операции с массивами** — `push`, `pull`, `addToSet`, `pop`, `pullAll`, `pushAll`.
+7. **`@fulltext`** — декларативное создание MongoDB text index для полнотекстового поиска.
+8. **Автоматическая инициализация массивов** — обязательные поля-массивы автоматически инициализируются пустым массивом.
+9. **Bytes** — тип `Buffer` для бинарных данных (MongoDB BinData).
+10. **BigInt** — тип `bigint` для 64-битных целых чисел (MongoDB Long).
+
 ## CRUD Operations
 
 Lenz provides a comprehensive set of CRUD operations similar to Prisma, with full TypeScript support and MongoDB-native performance.

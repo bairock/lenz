@@ -956,6 +956,17 @@ export class RelationResolver {
       formatted.id = formatted._id.toString()
       delete formatted._id
     }
+    // Convert BSON types to JS types
+    for (const key of Object.keys(formatted)) {
+      const val = formatted[key]
+      if (val !== null && typeof val === 'object') {
+        if (val._bsontype === 'Long') {
+          formatted[key] = val.toBigInt()
+        } else if (val._bsontype === 'Binary') {
+          formatted[key] = Buffer.from(val.buffer)
+        }
+      }
+    }
     return formatted
   }
 }

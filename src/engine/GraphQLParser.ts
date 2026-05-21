@@ -24,9 +24,13 @@ export interface GraphQLField {
   relationStrategy?: 'populate' | 'lookup';
   relationIndex?: boolean;
   relationName?: string | undefined;
-  onDelete: 'Cascade' | 'SetNull' | 'NoAction';
-  onUpdate?: 'Cascade' | 'SetNull' | 'NoAction' | undefined;
+  onDelete: 'Cascade' | 'SetNull' | 'NoAction' | 'Restrict';
+  onUpdate?: 'Cascade' | 'SetNull' | 'NoAction' | 'Restrict' | undefined;
   validationRules?: { email?: boolean; url?: boolean; regex?: string };
+  idName?: string;
+  idMap?: string;
+  uniqueName?: string;
+  uniqueMap?: string;
 }
 
 export interface GraphQLModel {
@@ -51,14 +55,15 @@ export interface ModelRelation {
   index: boolean;
   isForeignKeyArray: boolean;
   relationName?: string | undefined;
-  onDelete: 'Cascade' | 'SetNull' | 'NoAction';
-  onUpdate?: 'Cascade' | 'SetNull' | 'NoAction' | undefined;
+  onDelete: 'Cascade' | 'SetNull' | 'NoAction' | 'Restrict';
+  onUpdate?: 'Cascade' | 'SetNull' | 'NoAction' | 'Restrict' | undefined;
 }
 
 export interface ModelIndex {
   fields: string[];
   unique: boolean;
   sparse?: boolean;
+  name?: string;
 }
 
 export interface GraphQLEnum {
@@ -197,14 +202,34 @@ export class GraphQLParser {
             }
           }
 
+          // Parse @id(name, map) arguments
+          const idDir = field.directives?.find(d => d.name.value === 'id');
+          if (idDir?.arguments) {
+            const idNameArg = idDir.arguments.find(a => a.name.value === 'name');
+            if (idNameArg?.value.kind === 'StringValue') graphQLField.idName = idNameArg.value.value;
+            const idMapArg = idDir.arguments.find(a => a.name.value === 'map');
+            if (idMapArg?.value.kind === 'StringValue') graphQLField.idMap = idMapArg.value.value;
+          }
+
+          // Parse @unique(name, map) arguments
+          const uniqDir = field.directives?.find(d => d.name.value === 'unique');
+          if (uniqDir?.arguments) {
+            const uniqNameArg = uniqDir.arguments.find(a => a.name.value === 'name');
+            if (uniqNameArg?.value.kind === 'StringValue') graphQLField.uniqueName = uniqNameArg.value.value;
+            const uniqMapArg = uniqDir.arguments.find(a => a.name.value === 'map');
+            if (uniqMapArg?.value.kind === 'StringValue') graphQLField.uniqueMap = uniqMapArg.value.value;
+          }
+
           fields.push(graphQLField);
 
           if (!isEmbedded) {
             if (fieldDirectives.includes('unique') && !fieldDirectives.includes('id')) {
-              indexes.push({
+              const uniqueIdx: ModelIndex = {
                 fields: [field.name.value],
                 unique: true
-              });
+              };
+              if (graphQLField.uniqueName) uniqueIdx.name = graphQLField.uniqueName;
+              indexes.push(uniqueIdx);
             }
 
             if (fieldDirectives.includes('index')) {
@@ -228,10 +253,15 @@ export class GraphQLParser {
                 .filter(v => v.kind === 'StringValue')
                 .map(v => v.value);
               if (fieldNames.length > 0) {
-                indexes.push({
+                const nameArg = dir.arguments?.find(a => a.name.value === 'name');
+                const indexEntry: ModelIndex = {
                   fields: fieldNames,
                   unique: dirName === 'compoundUnique' || dirName === 'compoundId'
-                });
+                };
+                if (nameArg?.value.kind === 'StringValue') {
+                  indexEntry.name = nameArg.value.value;
+                }
+                indexes.push(indexEntry);
               }
             }
           }
@@ -329,10 +359,10 @@ export class GraphQLParser {
     name?: string;
     strategy?: 'populate' | 'lookup';
     index?: boolean;
-    onDelete: 'Cascade' | 'SetNull' | 'NoAction';
-    onUpdate?: 'Cascade' | 'SetNull' | 'NoAction' | undefined;
+    onDelete: 'Cascade' | 'SetNull' | 'NoAction' | 'Restrict';
+    onUpdate?: 'Cascade' | 'SetNull' | 'NoAction' | 'Restrict' | undefined;
   } {
-    const result: { field?: string; name?: string; strategy?: 'populate' | 'lookup'; index?: boolean; onDelete: 'Cascade' | 'SetNull' | 'NoAction'; onUpdate?: 'Cascade' | 'SetNull' | 'NoAction' } = { onDelete: 'NoAction' };
+    const result: { field?: string; name?: string; strategy?: 'populate' | 'lookup'; index?: boolean; onDelete: 'Cascade' | 'SetNull' | 'NoAction' | 'Restrict'; onUpdate?: 'Cascade' | 'SetNull' | 'NoAction' | 'Restrict' } = { onDelete: 'NoAction' };
     const relationDirective = fieldNode.directives?.find(d => d.name.value === 'relation');
     if (relationDirective?.arguments) {
       for (const arg of relationDirective.arguments) {
@@ -347,12 +377,12 @@ export class GraphQLParser {
         } else if (arg.name.value === 'index' && arg.value.kind === 'BooleanValue') {
           result.index = arg.value.value;
         } else if (arg.name.value === 'onDelete' && arg.value.kind === 'StringValue') {
-          if (arg.value.value === 'Cascade' || arg.value.value === 'SetNull' || arg.value.value === 'NoAction') {
-            result.onDelete = arg.value.value;
+          if (['Cascade', 'SetNull', 'NoAction', 'Restrict'].includes(arg.value.value)) {
+            result.onDelete = arg.value.value as 'Cascade' | 'SetNull' | 'NoAction' | 'Restrict';
           }
         } else if (arg.name.value === 'onUpdate' && arg.value.kind === 'StringValue') {
-          if (arg.value.value === 'Cascade' || arg.value.value === 'SetNull' || arg.value.value === 'NoAction') {
-            result.onUpdate = arg.value.value;
+          if (['Cascade', 'SetNull', 'NoAction', 'Restrict'].includes(arg.value.value)) {
+            result.onUpdate = arg.value.value as 'Cascade' | 'SetNull' | 'NoAction' | 'Restrict';
           }
         }
       }

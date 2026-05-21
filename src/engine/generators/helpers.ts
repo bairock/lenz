@@ -10,7 +10,9 @@ export const typeMap: Record<string, string> = {
   'DateTime': 'Date',
   'Date': 'Date',
   'Json': 'any',
-  'ObjectId': 'string'
+  'ObjectId': 'string',
+  'Bytes': 'Buffer',
+  'BigInt': 'bigint'
 };
 
 export function toCamelCase(str: string): string {
@@ -38,6 +40,8 @@ export function getScalarFilterType(graphqlType: string, isRequired: boolean): s
     case 'Date': return `Date | string | DateTime${nullable}Filter`;
     case 'ID': return `string | IDFilter`;
     case 'ObjectId': return `string | String${nullable}Filter`;
+    case 'BigInt': return `bigint | number | BigInt${nullable}Filter`;
+    case 'Bytes': return `Buffer | Bytes${nullable}Filter`;
     case 'Json': return `any | JsonFilter`;
     default: return `string | EnumFilter`; // Enum fallback
   }
@@ -48,6 +52,8 @@ export function getScalarArrayFilterType(graphqlType: string): string {
     case 'String': return `string | StringArrayFilter`;
     case 'Int': return `number | IntArrayFilter`;
     case 'Float': return `number | FloatArrayFilter`;
+    case 'BigInt': return `bigint | number | BigIntArrayFilter`;
+    case 'Bytes': return `Buffer | BytesArrayFilter`;
     case 'DateTime':
     case 'Date': return `Date | string | DateTimeArrayFilter`;
     default: return `string | StringArrayFilter`;

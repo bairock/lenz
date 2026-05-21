@@ -32,7 +32,8 @@ export class SchemaValidator {
   private relations: ModelRelation[];
   private supportedScalarTypes = new Set([
     'String', 'Int', 'Float', 'Boolean', 'ID',
-    'DateTime', 'Date', 'Json', 'ObjectId'
+    'DateTime', 'Date', 'Json', 'ObjectId',
+    'Bytes', 'BigInt'
   ]);
 
   constructor(
@@ -481,7 +482,7 @@ export class SchemaValidator {
       }
 
       // Validate onDelete
-      if (relation.onDelete && !['Cascade', 'SetNull', 'NoAction'].includes(relation.onDelete)) {
+      if (relation.onDelete && !['Cascade', 'SetNull', 'NoAction', 'Restrict'].includes(relation.onDelete)) {
         throw new SchemaValidationError(
           `Invalid onDelete value '${relation.onDelete}' for relation '${relation.field}' -> '${relation.target}'. ` +
           `Must be 'Cascade', 'SetNull', or 'NoAction'.`
@@ -489,7 +490,7 @@ export class SchemaValidator {
       }
 
       // Validate onUpdate
-      if (relation.onUpdate && !['Cascade', 'SetNull', 'NoAction'].includes(relation.onUpdate)) {
+      if (relation.onUpdate && !['Cascade', 'SetNull', 'NoAction', 'Restrict'].includes(relation.onUpdate)) {
         throw new SchemaValidationError(
           `Invalid onUpdate value '${relation.onUpdate}' for relation '${relation.field}' -> '${relation.target}'. ` +
           `Must be 'Cascade', 'SetNull', or 'NoAction'.`

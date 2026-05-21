@@ -167,6 +167,58 @@ export interface EnumFilter {
   not?: string
   in?: string[]
   notIn?: string[]
+}
+
+export interface BigIntFilter {
+  equals?: bigint | number
+  not?: bigint | number
+  in?: (bigint | number)[]
+  notIn?: (bigint | number)[]
+  lt?: bigint | number
+  lte?: bigint | number
+  gt?: bigint | number
+  gte?: bigint | number
+}
+
+export interface BigIntNullableFilter {
+  equals?: bigint | number | null
+  not?: bigint | number | null
+  in?: (bigint | number | null)[]
+  notIn?: (bigint | number | null)[]
+  lt?: bigint | number
+  lte?: bigint | number
+  gt?: bigint | number
+  gte?: bigint | number
+}
+
+export interface BytesFilter {
+  equals?: Buffer
+  not?: Buffer
+  in?: Buffer[]
+  notIn?: Buffer[]
+}
+
+export interface BytesNullableFilter {
+  equals?: Buffer | null
+  not?: Buffer | null
+  in?: (Buffer | null)[]
+  notIn?: (Buffer | null)[]
+}
+
+export interface BigIntArrayFilter {
+  has?: bigint | number
+  hasEvery?: (bigint | number)[]
+  hasSome?: (bigint | number)[]
+  isEmpty?: boolean
+  equals?: (bigint | number)[]
+}
+
+export interface BytesArrayFilter {
+  has?: Buffer
+  hasEvery?: Buffer[]
+  hasSome?: Buffer[]
+  isEmpty?: boolean
+  equals?: Buffer[]
 }`;
   }
 
@@ -368,7 +420,7 @@ ${fields.join('\n')}
 
   generateModelGroupByTypes(model: GraphQLModel): string {
     const aggFields = model.fields.filter(f =>
-      !f.isIgnored && ['Int', 'Float'].includes(f.type)
+      !f.isIgnored && ['Int', 'Float', 'BigInt'].includes(f.type)
     );
     const scalarFields = model.fields.filter(f => !f.isIgnored && !f.isRelation && !f.isId);
     const byFields = model.fields.filter(f => !f.isIgnored && !f.isRelation);
@@ -411,7 +463,7 @@ ${aggFields.length > 0 ? `  _sum: {${aggFields.map(f => `\n    ${f.name}: number
 
   generateModelAggregateTypes(model: GraphQLModel): string {
     const aggFields = model.fields.filter(f =>
-      !f.isIgnored && ['Int', 'Float'].includes(f.type)
+      !f.isIgnored && ['Int', 'Float', 'BigInt'].includes(f.type)
     );
     const scalarFields = model.fields.filter(f => !f.isIgnored && !f.isRelation && !f.isId);
     const byFields = model.fields.filter(f => !f.isIgnored && !f.isRelation);
@@ -473,6 +525,7 @@ export interface ${model.name}FindUniqueArgs {
   where: ${model.name}WhereUniqueInput
   select?: ${model.name}Select
   include?: ${includeType}
+  omit?: ${model.name}Select
   session?: any
 }
 
@@ -486,6 +539,7 @@ export interface ${model.name}CreateArgs {
   data: ${model.name}CreateInput
   select?: ${model.name}Select
   include?: ${includeType}
+  omit?: ${model.name}Select
   session?: any
 }
 
@@ -494,6 +548,7 @@ export interface ${model.name}UpdateArgs {
   data: ${model.name}UpdateInput
   select?: ${model.name}Select
   include?: ${includeType}
+  omit?: ${model.name}Select
   session?: any
 }
 
@@ -501,6 +556,7 @@ export interface ${model.name}DeleteArgs {
   where: ${model.name}WhereInput
   select?: ${model.name}Select
   include?: ${includeType}
+  omit?: ${model.name}Select
   session?: any
 }
 
@@ -510,6 +566,7 @@ export interface ${model.name}UpsertArgs {
   update: ${model.name}UpdateInput
   select?: ${model.name}Select
   include?: ${includeType}
+  omit?: ${model.name}Select
   session?: any
 }
 
@@ -525,7 +582,7 @@ export type ${model.name}QueryOptions = ${model.name}FindManyArgs`;
 import { ObjectId } from 'mongodb'
 
 // Base types
-export type ScalarType = 'String' | 'Int' | 'Float' | 'Boolean' | 'ID' | 'DateTime' | 'Date' | 'Json' | 'ObjectId'
+export type ScalarType = 'String' | 'Int' | 'Float' | 'Boolean' | 'ID' | 'DateTime' | 'Date' | 'Json' | 'ObjectId' | 'Bytes' | 'BigInt'
 export type RelationType = 'oneToOne' | 'oneToMany' | 'manyToOne' | 'manyToMany'
 
 // ===== Scalar Filter Types =====

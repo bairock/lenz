@@ -45,6 +45,22 @@ export class DelegateHelpers {
             lines.push(`    });`);
           }
         }
+      } else if (rel.onDelete === 'Restrict') {
+        if (rel.isForeignKeyArray && rel.foreignKey && (rel.foreignKeyLocation === 'source' || !rel.foreignKeyLocation)) {
+          lines.push(`    if (doc.${rel.foreignKey} && Array.isArray(doc.${rel.foreignKey}) && doc.${rel.foreignKey}.length > 0) {`);
+          lines.push(`      throw new Error(\`Cannot delete ${model.name}: relation '${rel.field}' has \${doc.${rel.foreignKey}.length} related ${rel.target} records (Restrict constraint)\`);`);
+          lines.push(`    }`);
+        } else if (rel.foreignKey && (rel.foreignKeyLocation === 'source' || !rel.foreignKeyLocation)) {
+          lines.push(`    if (doc.${rel.foreignKey}) {`);
+          lines.push(`      throw new Error(\`Cannot delete ${model.name}: relation '${rel.field}' has related ${rel.target} records (Restrict constraint)\`);`);
+          lines.push(`    }`);
+        } else if (rel.foreignKey) {
+          // FK on target collection — must query
+          lines.push(`    const restrictCount_${rel.field} = await this.client.${toCamelCase(rel.target)}.count({ where: { ${rel.foreignKey}: doc.id } });`);
+          lines.push(`    if (restrictCount_${rel.field} > 0) {`);
+          lines.push(`      throw new Error(\`Cannot delete ${model.name}: relation '${rel.field}' has \${restrictCount_${rel.field}} related ${rel.target} records (Restrict constraint)\`);`);
+          lines.push(`    }`);
+        }
       }
     }
 
@@ -84,6 +100,20 @@ export class DelegateHelpers {
           lines.push(`    }`);
         } else {
           lines.push(`    // FK '${rel.foreignKey}' stored in source document — SetNull on update handled by FK write`);
+        }
+      } else if (rel.onUpdate === 'Restrict') {
+        if (rel.foreignKeyLocation === 'target' || (!rel.foreignKeyLocation && rel.type !== 'manyToMany')) {
+          lines.push(`    if (oldData.${rel.foreignKey} && (!doc.${rel.foreignKey} || doc.${rel.foreignKey} !== oldData.${rel.foreignKey})) {`);
+          lines.push(`      const restrictCount_${rel.field} = await this.client.${toCamelCase(rel.target)}.count({ where: { ${rel.foreignKey}: oldData.id } });`);
+          lines.push(`      if (restrictCount_${rel.field} > 0) {`);
+          lines.push(`        throw new Error(\`Cannot update ${model.name}: relation '${rel.field}' has \${restrictCount_${rel.field}} related ${rel.target} records (Restrict constraint)\`);`);
+          lines.push(`      }`);
+          lines.push(`    }`);
+        } else {
+          lines.push(`    // FK in source — check if changed`);
+          lines.push(`    if (oldData.${rel.foreignKey} && (!doc.${rel.foreignKey} || doc.${rel.foreignKey} !== oldData.${rel.foreignKey})) {`);
+          lines.push(`      throw new Error(\`Cannot update ${model.name}: relation '${rel.field}' has related ${rel.target} records (Restrict constraint)\`);`);
+          lines.push(`    }`);
         }
       }
     }

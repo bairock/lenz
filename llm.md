@@ -85,7 +85,7 @@ export default defineConfig({
 
 ## Supported Field Types
 
-`String` → `string`, `Int`/`Float` → `number`, `Boolean` → `boolean`, `ID` → `string`, `DateTime`/`Date` → `Date`, `Json` → `any`, `ObjectId` → `string`
+`String` → `string`, `Int`/`Float` → `number`, `Boolean` → `boolean`, `ID` → `string`, `DateTime`/`Date` → `Date`, `Json` → `any`, `ObjectId` → `string`, `Bytes` → `Buffer`, `BigInt` → `bigint`
 
 ## Relations
 
@@ -246,6 +246,33 @@ await lenz.$transaction(async (tx) => {
 | `npx lenz generate` | Generate client from schema |
 | `npx lenz generate -c lenz/lenz.config.ts` | Custom config |
 | `npx lenz --help` | Help |
+
+## Сравнение с Prisma
+
+| Категория | Prisma | Lenz |
+|-----------|--------|------|
+| Schema DSL | Prisma Schema Language (.prisma) | GraphQL SDL (.graphql) |
+| Поддерживаемые БД | PostgreSQL, MySQL, SQLite, MongoDB, SQL Server, CockroachDB | Только MongoDB |
+| Миграции | Prisma Migrate | ❌ (ленивое создание коллекций) |
+| Интроспекция | `prisma db pull` | ❌ |
+| Studio | ✅ | ❌ |
+| Views | `@@view` | ❌ |
+| Типы: Bytes, BigInt | ✅ | ✅ |
+| Decimal | ✅ | ❌ (не применимо к MongoDB) |
+| Составные FK | `fields: [a,b], references: [c,d]` | ❌ (только одно поле) |
+| Middleware | `$use` | ❌ |
+| `omit` | ✅ | ✅ |
+| `onDelete: Restrict` | ✅ | ✅ |
+
+**Что Lenz умеет, чего нет в Prisma:**
+- `@embedded` — встроенные документы MongoDB
+- `@hide` — исключение полей по умолчанию
+- `@regex(pattern)` — кастомная валидация
+- Стратегии `populate`/`lookup` с авто-выбором
+- Гео-пространственные фильтры (near, geoWithin и др.)
+- Атомарные операции с массивами (push/pull/addToSet/pop)
+- `@fulltext` — декларативный MongoDB text index
+- Авто-инициализация обязательных массивов
 
 ## Important Notes
 

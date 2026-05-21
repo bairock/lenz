@@ -10,12 +10,32 @@ export const modelDirective = new GraphQLDirective({
 export const idDirective = new GraphQLDirective({
   name: 'id',
   locations: [DirectiveLocation.FIELD_DEFINITION],
+  args: {
+    name: {
+      type: GraphQLString,
+      description: 'Name for the primary key constraint (Prisma @id map parameter)'
+    },
+    map: {
+      type: GraphQLString,
+      description: 'Custom name for the underlying index in the database'
+    }
+  },
   description: 'Marks a field as primary key (auto-generated ObjectId)'
 });
 
 export const uniqueDirective = new GraphQLDirective({
   name: 'unique',
   locations: [DirectiveLocation.FIELD_DEFINITION],
+  args: {
+    name: {
+      type: GraphQLString,
+      description: 'Name for the unique constraint (Prisma @unique map parameter)'
+    },
+    map: {
+      type: GraphQLString,
+      description: 'Custom name for the underlying index in the database'
+    }
+  },
   description: 'Creates a unique index on the field'
 });
 
@@ -134,6 +154,10 @@ export const compoundUniqueDirective = new GraphQLDirective({
     fields: {
       type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString))),
       description: 'Field names to include in the compound unique index'
+    },
+    name: {
+      type: GraphQLString,
+      description: 'Optional name for the unique constraint (maps to Prisma @@unique map parameter)'
     }
   },
   description: 'Creates a compound unique index on multiple fields (Prisma @@unique)'
@@ -146,6 +170,10 @@ export const compoundIndexDirective = new GraphQLDirective({
     fields: {
       type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString))),
       description: 'Field names to include in the compound index'
+    },
+    name: {
+      type: GraphQLString,
+      description: 'Optional name for the index (maps to Prisma @@index map parameter)'
     }
   },
   description: 'Creates a compound index on multiple fields (Prisma @@index)'
@@ -158,6 +186,10 @@ export const compoundIdDirective = new GraphQLDirective({
     fields: {
       type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString))),
       description: 'Field names to include in the compound primary key'
+    },
+    name: {
+      type: GraphQLString,
+      description: 'Optional name for the primary key constraint'
     }
   },
   description: 'Defines a compound primary key on multiple fields (Prisma @@id)'

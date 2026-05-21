@@ -302,15 +302,19 @@ ${models.map(model => `    this.${toCamelCase(model.name)} = new ${model.name}De
         await this.db.createCollection(model.collectionName)
 
         if (model.indexes.length > 0) {
-          const indexes = model.indexes.map(index => ({
-            key: index.fields.reduce((acc, field) => {
-              const dbField = model.fieldDbNames?.[field] || field
-              acc[dbField] = 1
-              return acc
-            }, {}),
-            unique: index.unique,
-            sparse: index.sparse || false
-          }))
+          const indexes = model.indexes.map(index => {
+            const spec: any = {
+              key: index.fields.reduce((acc, field) => {
+                const dbField = model.fieldDbNames?.[field] || field
+                acc[dbField] = 1
+                return acc
+              }, {}),
+              unique: index.unique,
+              sparse: index.sparse || false
+            };
+            if (index.name) spec.name = index.name;
+            return spec;
+          })
 
           try {
             await this.db.collection(model.collectionName).createIndexes(indexes)
@@ -377,11 +381,15 @@ ${models.map(model => `    this.${toCamelCase(model.name)} = new ${model.name}De
       fieldDbNames: Object.fromEntries(
         model.fields.filter(f => f.dbName).map(f => [f.name, f.dbName])
       ),
-      indexes: model.indexes.map(index => ({
-        fields: index.fields,
-        unique: index.unique,
-        sparse: index.sparse ?? false
-      })),
+      indexes: model.indexes.map(index => {
+        const idx: any = {
+          fields: index.fields,
+          unique: index.unique,
+          sparse: index.sparse ?? false
+        };
+        if (index.name) idx.name = index.name;
+        return idx;
+      }),
       fulltextFields: model.fulltextFields
     }));
   }
