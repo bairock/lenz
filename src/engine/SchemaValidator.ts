@@ -13,7 +13,7 @@ import {
   InvalidDirectiveError,
   RelationValidationError
 } from '../errors/index.js';
-import { isLenzDirective, getDirectiveDefinition } from './directives.js';
+import { isLenzDirective } from './directives.js';
 
 export interface ValidationOptions {
   /** Whether to check for circular dependencies (default: true) */
@@ -101,6 +101,7 @@ export class SchemaValidator {
     this.validateEnumValues();
     this.validateEmbeddedModels();
     this.validateIndexes();
+    this.validateDefaultValues();
   }
 
   /**
@@ -143,6 +144,8 @@ export class SchemaValidator {
 
     for (const model of this.models) {
       for (const field of model.fields) {
+        // Skip @ignore fields — they are excluded from generated code
+        if (field.directives.includes('ignore')) continue;
         // Check if type exists (scalar, model, or enum)
         if (!validTypes.has(field.type)) {
           throw new InvalidFieldTypeError(
@@ -171,19 +174,29 @@ export class SchemaValidator {
   private validateDirectives(): void {
     for (const model of this.models) {
       // Check model-level directives
+      for (const directiveName of model.directives) {
+        if (isLenzDirective(directiveName)) {
+          if (directiveName !== 'model' && directiveName !== 'embedded' && directiveName !== 'modelMap' && directiveName !== 'fulltext') {
+            console.warn(`⚠️  Lenz directive '@${directiveName}' is not a model-level directive but used on model '${model.name}'.`);
+          }
+        } else {
+          console.warn(`⚠️  Custom directive '@${directiveName}' detected on model '${model.name}'. ` +
+            'Lenz does not validate custom directives.');
+        }
+      }
+
+      // Check field-level directives (excluding model-level)
       for (const directive of model.fields.flatMap(f => f.directives)) {
         const directiveName = directive.replace(/^@/, '');
 
         if (isLenzDirective(directiveName)) {
-          // Директива Lenz - проверяем соответствие ожидаемым местам применения
-          const directiveDef = getDirectiveDefinition(directiveName);
-          if (directiveDef) {
-            // TODO: В будущем можно добавить проверку мест применения (DirectiveLocation)
-            // Например, проверить что @model применяется только на уровне OBJECT
-            // а @id только на FIELD_DEFINITION
+          // Validate field-level directive location restrictions
+          const fieldLevelOnly = ['id', 'unique', 'index', 'default', 'hide', 'email', 'url', 'regex',
+            'map', 'createdAt', 'updatedAt', 'ignore', 'fulltext'];
+          if (fieldLevelOnly.includes(directiveName)) {
+            // These are field-level only, nothing extra to check
           }
         } else {
-          // Пользовательская директива - выводим предупреждение
           console.warn(`⚠️  Custom directive '@${directiveName}' detected in model '${model.name}'. ` +
             'Lenz does not validate custom directives.');
         }
@@ -258,7 +271,7 @@ export class SchemaValidator {
         // For manyToOne and oneToOne, foreign key must be in source (single ID)
         let modelWithForeignKey: GraphQLModel | undefined;
         let fieldInSource = sourceModel.fields.find(f =>
-          f.name === relation.foreignKey || f.name === `${relation.foreignKey}Id`
+          f.name === relation.foreignKey
         );
 
         // Always check source model for all relation types
@@ -382,6 +395,7 @@ export class SchemaValidator {
 
       const neighbors = graph.get(node) || [];
       for (const neighbor of neighbors) {
+        if (neighbor === node) continue; // skip self-references
         if (!visited.has(neighbor)) {
           dfs(neighbor, [...path]);
         } else if (recursionStack.has(neighbor)) {
@@ -401,16 +415,20 @@ export class SchemaValidator {
       }
     }
 
-    // Report cycles
+    // Report cycles — collect all unique cycles before throwing
     if (cycles.length > 0) {
-      // Deduplicate cycles (same cycle may be found multiple times)
       const uniqueCycles = cycles.map(cycle => cycle.join(' -> '))
         .filter((value, index, self) => self.indexOf(value) === index);
 
-      for (const cycle of uniqueCycles) {
+      if (uniqueCycles.length === 1) {
         throw new CircularDependencyError(
-          cycle.split(' -> '),
-          { cycle }
+          uniqueCycles[0].split(' -> '),
+          { cycle: uniqueCycles[0] }
+        );
+      } else {
+        throw new CircularDependencyError(
+          uniqueCycles[0].split(' -> '),
+          { cycle: uniqueCycles.join('; '), cycles: uniqueCycles }
         );
       }
     }
@@ -424,9 +442,10 @@ export class SchemaValidator {
       if (model.isEmbedded) continue;
       for (const field of model.fields) {
         if (field.isRequired && !field.isId && !field.defaultValue) {
-          // Check if it's a relation field (relations can be required but handled differently)
+          // Skip relation fields, FK fields, auto-timestamp fields, and @ignore fields
           if (!field.isRelation && !this.isForeignKeyField(model.name, field.name) &&
-              !field.directives.includes('createdAt') && !field.directives.includes('updatedAt')) {
+              !field.directives.includes('createdAt') && !field.directives.includes('updatedAt') &&
+              !field.directives.includes('ignore')) {
             console.warn(
               `⚠️  Required field '${field.name}' in model '${model.name}' has no default value`
             );
@@ -555,14 +574,15 @@ export class SchemaValidator {
       }
     }
 
-    // Check that embedded models are referenced only by @model types
+    // Verify embedded model references don't have @relation directive
     for (const model of this.models) {
       if (model.isEmbedded) continue;
       for (const field of model.fields) {
         if (field.isRelation) {
           const targetModel = this.models.find(m => m.name === field.type);
-          if (targetModel?.isEmbedded) {
-            // Embedded references are fine — they become nested document fields
+          if (targetModel?.isEmbedded && field.directives.includes('relation')) {
+            console.warn(`⚠️  Field '${field.name}' in model '${model.name}' references embedded model ` +
+              `'${field.type}' with @relation directive. Embedded models are nested documents, not separate collections.`);
           }
         }
       }
@@ -576,6 +596,13 @@ export class SchemaValidator {
     for (const model of this.models) {
       if (model.isEmbedded) continue;
       for (const index of model.indexes) {
+        // Check for duplicate field names in compound index
+        if (index.fields.length !== new Set(index.fields).size) {
+          const dupes = index.fields.filter((f, i) => index.fields.indexOf(f) !== i);
+          throw new SchemaValidationError(
+            `Compound index on model '${model.name}' contains duplicate fields: ${[...new Set(dupes)].join(', ')}`
+          );
+        }
         if (index.fields.length > 1) {
           // Compound index — verify all referenced fields exist
           for (const fieldName of index.fields) {
@@ -584,6 +611,60 @@ export class SchemaValidator {
               throw new SchemaValidationError(
                 `Compound index on model '${model.name}' references field '${fieldName}' which does not exist. ` +
                 `Available fields: ${model.fields.map(f => f.name).join(', ')}`
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Validate @default value types match the field type
+   */
+  private validateDefaultValues(): void {
+    const typeMap: Record<string, string> = {
+      String: 'string',
+      ID: 'string',
+      Int: 'number',
+      Float: 'number',
+      Boolean: 'boolean',
+      DateTime: 'string',
+      Date: 'string',
+      Json: 'any',
+      Bytes: 'string',
+      ObjectId: 'string',
+      BigInt: 'number'
+    };
+
+    const stringGenerators = new Set(['uuid', 'cuid', 'cuid2', 'ulid']);
+
+    for (const model of this.models) {
+      for (const field of model.fields) {
+        if (field.defaultGenerator) {
+          // Validate generator compatibility
+          if (stringGenerators.has(field.defaultGenerator) && field.type !== 'String' && field.type !== 'ID') {
+            console.warn(
+              `⚠️  @default(${field.defaultGenerator}()) on field '${field.name}' in model '${model.name}' ` +
+              `produces a string, but the field type is '${field.type}'.`
+            );
+          }
+          if (field.defaultGenerator === 'now' && field.type !== 'DateTime' && field.type !== 'Date') {
+            console.warn(
+              `⚠️  @default(now()) on field '${field.name}' in model '${model.name}' ` +
+              `produces a Date, but the field type is '${field.type}'.`
+            );
+          }
+        }
+
+        if (field.defaultValue !== undefined && !field.defaultGenerator) {
+          const expectedType = typeMap[field.type];
+          if (expectedType && expectedType !== 'any') {
+            const valueType = typeof field.defaultValue;
+            if (valueType !== expectedType) {
+              console.warn(
+                `⚠️  @default(value: ${JSON.stringify(field.defaultValue)}) on field '${field.name}' ` +
+                `in model '${model.name}' has type '${valueType}', but field type '${field.type}' expects '${expectedType}'.`
               );
             }
           }
@@ -606,11 +687,12 @@ export class SchemaValidator {
         warnings.push(`Model '${model.name}' has no @id field`);
       }
 
-      // Warn about required fields without defaults
+      // Warn about required fields without defaults (skip @ignore, relation, FK, and timestamp fields)
       for (const field of model.fields) {
         if (field.isRequired && !field.isId && !field.defaultValue && !field.isRelation &&
             !this.isForeignKeyField(model.name, field.name) &&
-            !field.directives.includes('createdAt') && !field.directives.includes('updatedAt')) {
+            !field.directives.includes('createdAt') && !field.directives.includes('updatedAt') &&
+            !field.directives.includes('ignore')) {
           warnings.push(
             `Required field '${field.name}' in model '${model.name}' has no default value`
           );

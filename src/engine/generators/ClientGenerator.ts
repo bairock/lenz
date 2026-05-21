@@ -46,15 +46,9 @@ ${models.map(model => `  public ${toCamelCase(model.name)}: ${model.name}Delegat
 
   private extractDatabaseFromUrl(url: string): string {
     try {
-      const parts = url.split('://');
-      if (parts.length < 2) return 'myapp';
-      const afterProtocol = parts[1];
-      const slashIndex = afterProtocol.indexOf('/');
-      if (slashIndex === -1) return 'myapp';
-      const afterSlash = afterProtocol.substring(slashIndex + 1);
-      const questionIndex = afterSlash.indexOf('?');
-      const database = questionIndex === -1 ? afterSlash : afterSlash.substring(0, questionIndex);
-      return database || 'myapp';
+      const parsed = new URL(url);
+      const db = parsed.pathname.replace(/^\//, '').split('/')[0];
+      return db || 'myapp';
     } catch {
       return 'myapp';
     }
@@ -322,20 +316,19 @@ ${models.map(model => `    this.${toCamelCase(model.name)} = new ${model.name}De
             console.warn(\`Failed to create indexes for \${model.name}:\`, error)
           }
         }
-      }
-    }
 
-      // Create full-text search index (if configured)
-      if (model.fulltextFields && model.fulltextFields.length > 0) {
-        try {
-          const textIndex: any = {};
-          for (const field of model.fulltextFields) {
-            const dbField = model.fieldDbNames?.[field] || field
-            textIndex[dbField] = 'text'
+        // Create full-text search index (if configured)
+        if (model.fulltextFields && model.fulltextFields.length > 0) {
+          try {
+            const textIndex: any = {};
+            for (const field of model.fulltextFields) {
+              const dbField = model.fieldDbNames?.[field] || field
+              textIndex[dbField] = 'text'
+            }
+            await this.db.collection(model.collectionName).createIndex(textIndex, { name: \`\${model.collectionName}_text\` })
+          } catch (error) {
+            console.warn(\`Failed to create text index for \${model.name}:\`, error)
           }
-          await this.db.collection(model.collectionName).createIndex(textIndex, { name: \`\${model.collectionName}_text\` })
-        } catch (error) {
-          console.warn(\`Failed to create text index for \${model.name}:\`, error)
         }
       }
     }

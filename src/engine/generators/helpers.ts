@@ -80,14 +80,29 @@ export function addJsExtensionsToImports(content: string): string {
 
 export function removeTypeScriptSyntax(content: string): string {
   let result = content;
-  result = result.replace(/(\w+)\s*:\s*[^=;,\n]+(?=\s*(=|;|,|\n))/g, '$1');
-  result = result.replace(/(\w+)<[^>]+>(?=\s*[\s\(])/g, '$1');
-  result = result.replace(/\s*:\s*[^{]+(?=\s*{)/g, '');
-  result = result.replace(/\s+as\s+[^,\n;]+/g, '');
-  result = result.replace(/export\s+(type|interface)\s+\w+.*\n/g, '');
+  // Remove type annotations in parameter lists (e.g., `name: string` → `name`)
+  // Match `identifier: Type` only when followed by `,`, `)`, `=`, or end of param/default
+  result = result.replace(/(\w+)\s*:\s*(?:string|number|boolean|any|void|null|undefined|never|bigint|symbol|object)\s*(?=\s*(?:,|\)|=|\n))/g, '$1');
+  // Handle complex type annotations (e.g., `name: SomeType` → `name`)
+  result = result.replace(/(\w+)\s*:\s*[A-Za-z_$][A-Za-z0-9_.$]+(?:\s*\[\])?\s*(?=\s*(?:,|\)|=|\n))/g, '$1');
+  // Remove type annotations on variable/function declarations
+  result = result.replace(/(\w+(?:\s*\|\s*\w+)*)\s*:\s*[^{;]+(?=\s*[=;{])/g, '$1');
+  // Remove generic type parameters (e.g., `Array<string>` → `Array`)
+  result = result.replace(/(\w+)<[^>\n]+>(?=\s*(?:\(|\n|;|\.))/g, '$1');
+  // Remove return type annotations (e.g., `): Type {` → `) {`)
+  result = result.replace(/\)\s*:\s*[A-Za-z_$][A-Za-z0-9_.$<>[\]\s,|&]+(?=\s*\{)/g, ')');
+  // Remove `as Type` casts
+  result = result.replace(/\s+as\s+[A-Za-z_$][A-Za-z0-9_.<>[\]\s,|&]+/g, '');
+  // Remove `as const` assertions
   result = result.replace(/ as const/g, '');
-  result = result.replace(/\b(private|protected|public)\s+/g, '');
-  result = result.replace(/\n\s*\n\s*\n/g, '\n\n');
+  // Remove export type/interface declarations
+  result = result.replace(/export\s+(type|interface)\s+\w+[\s\S]*?(?=\n(?:export|\/\/|\n|$))/g, '');
+  // Remove access modifiers
+  result = result.replace(/\b(private|protected|public|readonly)\s+/g, '');
+  // Remove abstract keyword
+  result = result.replace(/\babstract\s+/g, '');
+  // Collapse triple+ newlines
+  result = result.replace(/\n{3,}/g, '\n\n');
   return result;
 }
 
@@ -109,13 +124,20 @@ export function compileTypeScriptToJavaScript(content: string): string {
         inlineSourceMap: true,
         declaration: false,
         strict: false,
+        noImplicitAny: false,
+        noImplicitReturns: false,
+        noFallthroughCasesInSwitch: false,
         esModuleInterop: true,
-        skipLibCheck: true
+        skipLibCheck: true,
+        ignoreDeprecations: '5.0',
+        isolatedModules: true,
+        useUnknownInCatchVariables: false,
       }
     });
     return addJsExtensionsToImports(result.outputText);
   } catch (error) {
-    console.error('TypeScript compilation failed:', error);
+    // Fallback to improved regex-based conversion
+    console.error('TypeScript compilation failed, using regex fallback:', error);
     return convertToJavaScript(content);
   }
 }
@@ -256,7 +278,7 @@ export function convertToDeclaration(content: string): string {
         continue;
       }
 
-      const isMember = /^\s*(?:(?:private|public|protected|static)\s+)*(?:async\s+)?(?:get\s+|set\s+)?\w+\s*\(/.test(trimmed);
+      const isMember = /^\s*(?:(?:private|public|protected|static)\s+)*(?:async\s+)?(?:get\s+|set\s+)?\w+(?:\s*<[^>]*>)?\s*\(/.test(trimmed);
       const isCtor = /^\s*(?:private|public|protected|static\s+)?constructor\s*\(/.test(trimmed);
       const isMethod = isMember || isCtor;
 

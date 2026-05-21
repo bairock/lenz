@@ -2,6 +2,7 @@ import { parse, DocumentNode, ObjectTypeDefinitionNode, TypeNode, EnumTypeDefini
 import { SchemaValidator } from './SchemaValidator.js';
 import { SchemaParseError } from '../errors/index.js';
 import { lenzDirectives } from './directives.js';
+import { toCamelCase } from './generators/helpers.js';
 
 export interface GraphQLField {
   name: string;
@@ -40,6 +41,7 @@ export interface GraphQLModel {
   relations: ModelRelation[];
   indexes: ModelIndex[];
   isEmbedded: boolean;
+  directives: string[];
   description?: string;
   fulltextFields?: string[] | undefined;
 }
@@ -169,7 +171,7 @@ export class GraphQLParser {
             directives: fieldDirectives,
             defaultValue: defaultData.value ?? this.getDefaultValue(fieldDirectives, field),
             foreignKey: relationData.field ?? this.getRelationField(fieldDirectives, field),
-            relationStrategy: relationData.strategy ?? 'populate',
+            relationStrategy: relationData.strategy, // leave undefined when not set; determineRelationType fills default
             relationIndex: relationData.index ?? true,
             onDelete: relationData.onDelete ?? 'NoAction',
             onUpdate: relationData.onUpdate,
@@ -223,7 +225,7 @@ export class GraphQLParser {
           fields.push(graphQLField);
 
           if (!isEmbedded) {
-            if (fieldDirectives.includes('unique') && !fieldDirectives.includes('id')) {
+            if (fieldDirectives.includes('unique') && !fieldDirectives.includes('id') && !fieldDirectives.includes('ignore')) {
               const uniqueIdx: ModelIndex = {
                 fields: [field.name.value],
                 unique: true
@@ -232,7 +234,7 @@ export class GraphQLParser {
               indexes.push(uniqueIdx);
             }
 
-            if (fieldDirectives.includes('index')) {
+            if (fieldDirectives.includes('index') && !fieldDirectives.includes('ignore')) {
               indexes.push({
                 fields: [field.name.value],
                 unique: false
@@ -296,9 +298,9 @@ export class GraphQLParser {
       // Extract @@map/@modelMap directive for collection name override
       let collectionName = isEmbedded ? '' : this.toCollectionName(modelName);
       if (!isEmbedded && typeDef.directives) {
-        const modelMapDir = typeDef.directives.find(d => d.name.value === 'modelMap');
-        if (modelMapDir?.arguments) {
-          const nameArg = modelMapDir.arguments.find(a => a.name.value === 'name');
+        const mapDir = typeDef.directives.find(d => d.name.value === 'modelMap' || d.name.value === 'map');
+        if (mapDir?.arguments) {
+          const nameArg = mapDir.arguments.find(a => a.name.value === 'name');
           if (nameArg?.value.kind === 'StringValue') {
             collectionName = nameArg.value.value;
           }
@@ -311,7 +313,8 @@ export class GraphQLParser {
         collectionName,
         relations: [],
         indexes,
-        isEmbedded
+        isEmbedded,
+        directives
       };
       if (fulltextFields.length > 0) {
         modelData.fulltextFields = fulltextFields;
@@ -329,26 +332,32 @@ export class GraphQLParser {
     baseType: string;
     isArray: boolean;
     isRequired: boolean;
+    innerElementsRequired: boolean;
   } {
     let current = typeNode;
     let isArray = false;
     let isRequired = false;
+    let innerElementsRequired = false;
+    let depth = 0;
 
     while (true) {
       switch (current.kind) {
         case 'NonNullType':
-          isRequired = true;
+          if (depth === 0) isRequired = true;
+          if (depth >= 1) innerElementsRequired = true;
           current = current.type;
           break;
         case 'ListType':
           isArray = true;
+          depth++;
           current = current.type;
           break;
         case 'NamedType':
           return {
             baseType: current.name.value,
             isArray,
-            isRequired
+            isRequired,
+            innerElementsRequired
           };
       }
     }
@@ -566,10 +575,10 @@ export class GraphQLParser {
     // Автоматическая генерация foreign key если не указан
     if (!foreignKey && relationType !== 'manyToMany') {
       if (relationType === 'oneToMany') {
-        foreignKey = `${targetModel.name.toLowerCase()}Ids`;
+        foreignKey = `${toCamelCase(targetModel.name)}Ids`;
       } else {
         // manyToOne или oneToOne
-        foreignKey = `${targetModel.name.toLowerCase()}Id`;
+        foreignKey = `${toCamelCase(targetModel.name)}Id`;
       }
     }
 

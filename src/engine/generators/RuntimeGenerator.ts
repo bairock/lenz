@@ -640,15 +640,15 @@ export class QueryBuilder {
       if (op === 'mode') continue;
 
       if (op === 'string_contains') {
-        filter[targetField] = { $regex: value, $options: 'i' };
+        filter[targetField] = { $regex: String(value).replace(/[.*+?^\${}()|[\]\\\\]/g, '\\\\$&'), $options: 'i' };
         continue;
       }
       if (op === 'string_starts_with') {
-        filter[targetField] = { $regex: \`^\${value}\`, $options: 'i' };
+        filter[targetField] = { $regex: \`^\${String(value).replace(/[.*+?^\${}()|[\]\\\\]/g, '\\\\$&')}\`, $options: 'i' };
         continue;
       }
       if (op === 'string_ends_with') {
-        filter[targetField] = { $regex: \`\${value}\$\`, $options: 'i' };
+        filter[targetField] = { $regex: \`\${String(value).replace(/[.*+?^\${}()|[\]\\\\]/g, '\\\\$&')}\$\`, $options: 'i' };
         continue;
       }
 
@@ -675,8 +675,9 @@ export class QueryBuilder {
       if (op === 'equals') {
         if (Array.isArray(value)) {
           filter[targetField] = { $eq: value };
+          continue;
         }
-        continue;
+        // Non-array values fall through to generic $eq handler below
       }
 
       // Geo-spatial operators (MongoDB)
@@ -729,11 +730,11 @@ export class QueryBuilder {
 
       if (mongoOp) {
         if (op === 'contains') {
-          filter[targetField] = { $regex: value, $options: isInsensitive ? 'i' : '' }
+          filter[targetField] = { $regex: String(value).replace(/[.*+?^\${}()|[\]\\\\]/g, '\\\\$&'), $options: isInsensitive ? 'i' : '' }
         } else if (op === 'startsWith') {
-          filter[targetField] = { $regex: \`^\${value}\`, $options: isInsensitive ? 'i' : '' }
+          filter[targetField] = { $regex: \`^\${String(value).replace(/[.*+?^\${}()|[\]\\\\]/g, '\\\\$&')}\`, $options: isInsensitive ? 'i' : '' }
         } else if (op === 'endsWith') {
-          filter[targetField] = { $regex: \`\${value}\$\`, $options: isInsensitive ? 'i' : '' }
+          filter[targetField] = { $regex: \`\${String(value).replace(/[.*+?^\${}()|[\]\\\\]/g, '\\\\$&')}\$\`, $options: isInsensitive ? 'i' : '' }
         } else if (isInsensitive && (op === 'equals' || op === 'not')) {
           const escapedValue = String(value).replace(/[.*+?^\${}()|[\]\\\\]/g, '\\\\$&');
           filter[targetField] = {
@@ -957,14 +958,15 @@ export class RelationResolver {
       delete formatted._id
     }
     // Convert BSON types to JS types
-    for (const key of Object.keys(formatted)) {
-      const val = formatted[key]
-      if (val !== null && typeof val === 'object') {
+    for (const [key, val] of Object.entries(formatted)) {
+      if (val !== null && typeof val === 'object' && val._bsontype) {
         if (val._bsontype === 'Long') {
           formatted[key] = val.toBigInt()
         } else if (val._bsontype === 'Binary') {
           formatted[key] = Buffer.from(val.buffer)
         }
+      } else if (val !== null && val instanceof ObjectId) {
+        formatted[key] = val.toString()
       }
     }
     return formatted

@@ -13,13 +13,16 @@ export class DelegateGenerator {
 
   generateModelFiles(models: GraphQLModel[]): Record<string, string> {
     const files: Record<string, string> = {};
+    const collectionMap = Object.fromEntries(
+      models.map(m => [m.name, m.collectionName])
+    );
     for (const model of models) {
-      files[`models/${model.name}.ts`] = this.generateModelDelegate(model);
+      files[`models/${model.name}.ts`] = this.generateModelDelegate(model, collectionMap);
     }
     return files;
   }
 
-  generateModelDelegate(model: GraphQLModel): string {
+  generateModelDelegate(model: GraphQLModel, collectionNameMap: Record<string, string> = {}): string {
     const hasCascade = model.relations.some(r => r.onDelete !== 'NoAction');
     const hasCascadeUpdate = model.relations.some(r => r.onUpdate && r.onUpdate !== 'NoAction');
     const hasGenerator = model.fields.some(f => f.defaultGenerator);
@@ -99,7 +102,7 @@ export class ${model.name}Delegate {
     try {
       let result = await fn()
       const duration = Date.now() - start
-      this.client.logger.query({ method: name, duration, timestamp: new Date() })
+      this.client.logger.query({ operation: name, collection: this.modelName, query: '', duration, timestamp: new Date() })
 
       const resultExts = this.client.getResultExtensions(this.modelName)
       if (resultExts && result) {
@@ -113,7 +116,7 @@ export class ${model.name}Delegate {
       return result
     } catch (error) {
       const duration = Date.now() - start
-      this.client.logger.query({ method: name, duration, timestamp: new Date() })
+      this.client.logger.query({ operation: name, collection: this.modelName, query: '', duration, timestamp: new Date() })
       throw wrapMongoError(error, \`\${this.constructor.name}.\${name}\`)
     }
   }
@@ -134,10 +137,10 @@ export class ${model.name}Delegate {
     )
   )};
 
-  private readonly relationFilters: Array<{ field: string; foreignKey: string; target: string; isArray: boolean }> = ${JSON.stringify(
+  private readonly relationFilters: Array<{ field: string; foreignKey: string; target: string; targetCollection: string; isArray: boolean }> = ${JSON.stringify(
     model.relations
       .filter(r => r.foreignKey && !r.joinCollection)
-      .map(r => ({ field: r.field, foreignKey: r.foreignKey!, target: r.target, isArray: r.isForeignKeyArray }))
+      .map(r => ({ field: r.field, foreignKey: r.foreignKey!, target: r.target, targetCollection: collectionNameMap[r.target] || r.target.toLowerCase() + 's', isArray: r.isForeignKeyArray }))
   )};
 
   private async processRelationFilters(where: any): Promise<any> {
@@ -147,7 +150,7 @@ export class ${model.name}Delegate {
       const relFilter = result[rel.field];
       if (!relFilter) continue;
 
-      const targetCol = this.client.$db.collection(rel.target.toLowerCase() + 's');
+      const targetCol = this.client.$db.collection(rel.targetCollection);
 
       if (relFilter.is || relFilter.isNot) {
         const subWhere = relFilter.is || relFilter.isNot;
@@ -299,9 +302,7 @@ export class ${model.name}Delegate {
       const formatted = docs.map(RelationResolver.formatDocument)
 
       if (args?.include) {
-        return await Promise.all(
-          formatted.map(doc => this.includeRelations(doc, args.include!))
-        )
+        return await this.batchIncludeRelations(formatted, args.include!)
       }
 
       return formatted
@@ -496,6 +497,11 @@ export class ${model.name}Delegate {
       }
 
       const update = QueryBuilder.buildUpdate(updateData)
+      // Fetch pre-update document for cascade update diffing
+      const preUpdateDoc = await this.collection.findOne(
+        query,
+        args.session ? { session: args.session } : {}
+      )
       const result = await this.collection.findOneAndUpdate(
         query,
         update,
@@ -508,7 +514,7 @@ export class ${model.name}Delegate {
       }
 
       const updatedDocId = RelationResolver.formatDocument(updatedDoc).id;
-      const preRelationDoc = RelationResolver.formatDocument(updatedDoc);
+      const preRelationDoc = preUpdateDoc ? RelationResolver.formatDocument(preUpdateDoc) : null;
 
       const postUpdateSets: Record<string, any> = {};
       const postUpdatePushes: Record<string, any> = {};
@@ -619,7 +625,12 @@ export class ${model.name}Delegate {
       if (Object.keys(postUpdateSets).length > 0 || Object.keys(postUpdatePushes).length > 0 || Object.keys(postUpdatePulls).length > 0) {
         const postUpdateCmd: Record<string, any> = {};
         if (Object.keys(postUpdateSets).length > 0) postUpdateCmd.$set = postUpdateSets;
-        if (Object.keys(postUpdatePushes).length > 0) postUpdateCmd.$push = { $each: postUpdatePushes };
+        if (Object.keys(postUpdatePushes).length > 0) {
+          postUpdateCmd.$push = {};
+          for (const [field, ids] of Object.entries(postUpdatePushes)) {
+            postUpdateCmd.$push[field] = { $each: ids as string[] };
+          }
+        }
         if (Object.keys(postUpdatePulls).length > 0) {
           const pullCmd: Record<string, any> = {};
           for (const [field, ids] of Object.entries(postUpdatePulls)) {
@@ -955,6 +966,19 @@ ${this.relations.generateCountInIncludeCode(model)}
 ${this.relations.generateRelationInclusionCode(model)}
 
     return result
+  }
+
+  private async batchIncludeRelations(documents: any[], include: any): Promise<any[]> {
+    if (!include || typeof include !== 'object' || documents.length === 0) {
+      return documents.map(d => ({ ...d }))
+    }
+    if (documents.length === 1) {
+      return [await this.includeRelations(documents[0], include)]
+    }
+
+${this.relations.generateBatchInclusionCode(model)}
+
+    return documents.map(d => ({ ...d }))
   }
 
   get $raw() {

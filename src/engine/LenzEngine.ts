@@ -61,13 +61,24 @@ export class LenzEngine {
 
       const generatedFiles = this.generator.generate(codeGenOptions);
 
-      // 4. Write files
+      // 4. Write files with cleanup on failure
+      const writtenFiles: string[] = [];
       let fileCount = 0;
-      for (const [filePath, content] of Object.entries(generatedFiles)) {
-        const fullPath = join(this.options.outputPath, filePath);
-        await this.ensureDirectoryStructure(dirname(fullPath));
-        await fs.writeFile(fullPath, content, 'utf-8');
-        fileCount++;
+      try {
+        for (const [filePath, content] of Object.entries(generatedFiles)) {
+          const fullPath = join(this.options.outputPath, filePath);
+          await this.ensureDirectoryStructure(dirname(fullPath));
+          await fs.writeFile(fullPath, content, 'utf-8');
+          writtenFiles.push(fullPath);
+          fileCount++;
+        }
+      } catch (writeError) {
+        // Clean up partially written files
+        console.warn(chalk.yellow(`⚠️  Write failed, cleaning up ${writtenFiles.length} written files...`));
+        for (const filePath of writtenFiles) {
+          await fs.unlink(filePath).catch(() => {});
+        }
+        throw writeError;
       }
 
       // 5. Generate package.json for the client

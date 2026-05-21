@@ -1,8 +1,9 @@
 import { Command } from 'commander';
 import { LenzEngine } from '../../engine/LenzEngine.js';
-import { existsSync } from 'fs';
+import { existsSync, promises as fs } from 'fs';
 import { resolve, dirname } from 'path';
 import chalk from 'chalk';
+import * as ts from 'typescript';
 import { ConfigurationError } from '../../errors/index.js';
 
 interface GenerateOptions {
@@ -40,9 +41,30 @@ export const generateCommand = new Command('generate')
       // Загружаем конфигурацию
       if (existsSync(configPath)) {
         if (configPath.endsWith('.ts')) {
-          // Для TypeScript конфига
-          const configModule = await import(configPath);
-          config = configModule.default || configModule;
+          // Try direct import first (works when running via tsx), fallback to transpile
+          try {
+            const configModule = await import(configPath);
+            config = configModule.default || configModule;
+          } catch {
+            // Fallback: transpile with TypeScript compiler
+            const tsCode = await fs.readFile(configPath, 'utf-8');
+            const jsCode = ts.transpileModule(tsCode, {
+              compilerOptions: {
+                target: ts.ScriptTarget.ES2020,
+                module: ts.ModuleKind.ESNext,
+                strict: false,
+                esModuleInterop: true,
+              }
+            }).outputText;
+            const tempPath = resolve(dirname(configPath), `.lenz-config-${Date.now()}.mjs`);
+            await fs.writeFile(tempPath, jsCode, 'utf-8');
+            try {
+              const configModule = await import(tempPath);
+              config = configModule.default || configModule;
+            } finally {
+              await fs.unlink(tempPath).catch(() => {});
+            }
+          }
         } else if (configPath.endsWith('.js') || configPath.endsWith('.mjs')) {
           // Для JavaScript конфига (только ESM)
           const configModule = await import(configPath);
@@ -103,6 +125,6 @@ export const generateCommand = new Command('generate')
       if (typeof error === 'object' && error !== null && 'details' in error) {
         console.log(chalk.gray('   Details:', JSON.stringify((error as any).details, null, 2)));
       }
-      process.exit(1);
+      throw error;
     }
   });

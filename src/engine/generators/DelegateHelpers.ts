@@ -13,7 +13,10 @@ export class DelegateHelpers {
       lines.push(`    // Relation: ${rel.field} (${rel.type}) - onDelete: ${rel.onDelete}`);
 
       if (rel.onDelete === 'Cascade') {
-        if (rel.isForeignKeyArray) {
+        if (rel.joinCollection) {
+          // Many-to-many with join collection — delete join entries
+          lines.push(`    await this.client.$db.collection('${rel.joinCollection}').deleteMany({ ${toCamelCase(model.name)}Id: doc.id });`);
+        } else if (rel.isForeignKeyArray) {
           lines.push(`    if (doc.${rel.foreignKey} && Array.isArray(doc.${rel.foreignKey}) && doc.${rel.foreignKey}.length > 0) {`);
           lines.push(`      await this.client.${toCamelCase(rel.target)}.deleteMany({ where: { id: { in: doc.${rel.foreignKey} } } });`);
           lines.push(`    }`);
@@ -30,7 +33,7 @@ export class DelegateHelpers {
           lines.push(`    await this.client.${toCamelCase(rel.target)}.deleteMany({ where: { ${rel.foreignKey}: doc.id } });`);
         }
       } else if (rel.onDelete === 'SetNull') {
-        if (rel.foreignKeyLocation === 'source' || rel.isForeignKeyArray) {
+        if (rel.foreignKeyLocation === 'source') {
           lines.push(`    // FK '${rel.foreignKey}' is in the source document being deleted — no action needed`);
         } else {
           if (rel.isForeignKeyArray) {
@@ -74,6 +77,7 @@ export class DelegateHelpers {
 
     const lines: string[] = [];
     lines.push(`  private async handleCascadeUpdate(doc: any, oldData: any): Promise<void> {`);
+    lines.push(`    if (!oldData) return;`);
 
     for (const rel of cascadeRelations) {
       lines.push(`    // Relation: ${rel.field} (${rel.type}) - onUpdate: ${rel.onUpdate}`);
@@ -137,8 +141,21 @@ export class DelegateHelpers {
       }`);
       }
       if (field.validationRules.regex) {
-        const pattern = field.validationRules.regex.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\\\'");
-        rules.push(`      if (data.${field.name} && !new RegExp('${pattern}').test(data.${field.name})) {
+        // Validate regex pattern for safety (reject ReDoS-prone patterns)
+        const rawPattern = field.validationRules.regex;
+        // Detect nested quantifiers: (a+)+, (a*)*, (a+)*, (a*)+, (.*)+, (.+)+
+        // Detect overlapping alternations: (a|aa), (a|a)
+        // Detect unbounded repetition after optional: .*.*, .+.+, (\w*)*
+        const unsafePattern = /\([^)]*[+*]\)\s*[+*]|\([^)]*\{[^}]*\}\)\s*[+*]|\.[*+]\s*[*+]|\([^)]+\|[^)]+\)\s*[+*]?|\[[^\]]*\]\{|\.\*.*\.\*|\(a+\)\+|\(a\|aa\)/;
+        if (unsafePattern.test(rawPattern)) {
+          console.warn(`⚠️  Pattern '${rawPattern}' on ${field.name} may be vulnerable to ReDoS attacks`);
+        }
+        // Warn on very long patterns
+        if (rawPattern.length > 100) {
+          console.warn(`⚠️  Pattern on ${field.name} is ${rawPattern.length} characters long — may impact query performance`);
+        }
+        const escapedPattern = rawPattern.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        rules.push(`      if (data.${field.name} && !new RegExp('${escapedPattern}').test(data.${field.name})) {
         throw new Error('Validation failed: ${field.name} does not match required pattern')
       }`);
       }

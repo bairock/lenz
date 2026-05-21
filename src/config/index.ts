@@ -87,8 +87,10 @@ export function defineConfig(config: LenzConfig): LenzConfig {
 /**
  * Load environment variables
  */
-export function env(key: string, defaultValue?: string): string {
-  return process.env[key] || defaultValue || '';
+export function env(key: string, defaultValue?: string): string | undefined {
+  const value = process.env[key];
+  if (value !== undefined) return value;
+  return defaultValue;
 }
 
 /**
