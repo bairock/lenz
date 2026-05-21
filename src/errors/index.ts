@@ -127,7 +127,18 @@ export class RelationValidationError extends SchemaValidationError {
   }
 }
 
+export class NotFoundError extends LenzError {
+  constructor(modelName: string, where?: any, details?: Record<string, any>) {
+    super('NOT_FOUND', `${modelName} not found with where: ${JSON.stringify(where)}`, {
+      modelName,
+      where,
+      ...details
+    });
+    this.name = 'NotFoundError';
+  }
+}
+
 // Utility function to check if error is a LenzError
 export function isLenzError(error: any): error is LenzError {
-  return error && typeof error === 'object' && error.name === 'LenzError';
+  return error instanceof LenzError;
 }

@@ -98,6 +98,8 @@ export class SchemaValidator {
     // Additional validations
     this.validateRequiredFields();
     this.validateEnumValues();
+    this.validateEmbeddedModels();
+    this.validateIndexes();
   }
 
   /**
@@ -486,6 +488,14 @@ export class SchemaValidator {
         );
       }
 
+      // Validate onUpdate
+      if (relation.onUpdate && !['Cascade', 'SetNull', 'NoAction'].includes(relation.onUpdate)) {
+        throw new SchemaValidationError(
+          `Invalid onUpdate value '${relation.onUpdate}' for relation '${relation.field}' -> '${relation.target}'. ` +
+          `Must be 'Cascade', 'SetNull', or 'NoAction'.`
+        );
+      }
+
       // Validate SetNull requires nullable FK
       if (relation.onDelete === 'SetNull' && relation.foreignKey) {
         const sourceModel = this.models.find(m =>
@@ -527,6 +537,56 @@ export class SchemaValidator {
           `⚠️  Lookup strategy selected for relation '${relation.field}' -> '${relation.target}'. ` +
           `Note: You must manually synchronize ID arrays (e.g., ${relation.foreignKey}) when creating/updating/deleting related documents.`
         );
+      }
+    }
+  }
+
+  /**
+   * Validate embedded model usage
+   */
+  private validateEmbeddedModels(): void {
+    for (const model of this.models) {
+      if (!model.isEmbedded) continue;
+
+      // Check embedded model has at least one field
+      if (model.fields.length === 0) {
+        console.warn(`⚠️  Embedded model '${model.name}' has no fields`);
+      }
+    }
+
+    // Check that embedded models are referenced only by @model types
+    for (const model of this.models) {
+      if (model.isEmbedded) continue;
+      for (const field of model.fields) {
+        if (field.isRelation) {
+          const targetModel = this.models.find(m => m.name === field.type);
+          if (targetModel?.isEmbedded) {
+            // Embedded references are fine — they become nested document fields
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Validate model indexes (compound directive fields must exist)
+   */
+  private validateIndexes(): void {
+    for (const model of this.models) {
+      if (model.isEmbedded) continue;
+      for (const index of model.indexes) {
+        if (index.fields.length > 1) {
+          // Compound index — verify all referenced fields exist
+          for (const fieldName of index.fields) {
+            const fieldExists = model.fields.some(f => f.name === fieldName);
+            if (!fieldExists) {
+              throw new SchemaValidationError(
+                `Compound index on model '${model.name}' references field '${fieldName}' which does not exist. ` +
+                `Available fields: ${model.fields.map(f => f.name).join(', ')}`
+              );
+            }
+          }
+        }
       }
     }
   }

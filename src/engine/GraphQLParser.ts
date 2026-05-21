@@ -12,14 +12,21 @@ export interface GraphQLField {
   isUnique: boolean;
   isRelation: boolean;
   isHidden: boolean;
+  isIgnored: boolean;
   relationType?: 'oneToOne' | 'oneToMany' | 'manyToOne' | 'manyToMany';
   relationTo?: string;
   foreignKey: string | undefined;
   directives: string[];
   defaultValue?: any;
+  defaultGenerator?: string;
+  dbName?: string;
+  description?: string;
   relationStrategy?: 'populate' | 'lookup';
   relationIndex?: boolean;
+  relationName?: string | undefined;
   onDelete: 'Cascade' | 'SetNull' | 'NoAction';
+  onUpdate?: 'Cascade' | 'SetNull' | 'NoAction' | undefined;
+  validationRules?: { email?: boolean; url?: boolean; regex?: string };
 }
 
 export interface GraphQLModel {
@@ -29,6 +36,8 @@ export interface GraphQLModel {
   relations: ModelRelation[];
   indexes: ModelIndex[];
   isEmbedded: boolean;
+  description?: string;
+  fulltextFields?: string[] | undefined;
 }
 
 export interface ModelRelation {
@@ -41,7 +50,9 @@ export interface ModelRelation {
   strategy: 'populate' | 'lookup';
   index: boolean;
   isForeignKeyArray: boolean;
+  relationName?: string | undefined;
   onDelete: 'Cascade' | 'SetNull' | 'NoAction';
+  onUpdate?: 'Cascade' | 'SetNull' | 'NoAction' | undefined;
 }
 
 export interface ModelIndex {
@@ -138,6 +149,8 @@ export class GraphQLParser {
           const isRelation = this.isModelType(fieldType.baseType);
 
           const relationData = this.parseRelationDirective(field);
+          const defaultData = this.parseDefaultDirective(field);
+          const mapData = this.parseMapDirective(field);
           const graphQLField: GraphQLField = {
             name: field.name.value,
             type: fieldType.baseType,
@@ -147,13 +160,42 @@ export class GraphQLParser {
             isUnique: fieldDirectives.includes('unique'),
             isRelation,
             isHidden: fieldDirectives.includes('hide'),
+            isIgnored: fieldDirectives.includes('ignore'),
             directives: fieldDirectives,
-            defaultValue: this.getDefaultValue(fieldDirectives, field),
+            defaultValue: defaultData.value ?? this.getDefaultValue(fieldDirectives, field),
             foreignKey: relationData.field ?? this.getRelationField(fieldDirectives, field),
             relationStrategy: relationData.strategy ?? 'populate',
             relationIndex: relationData.index ?? true,
-            onDelete: relationData.onDelete ?? 'NoAction'
+            onDelete: relationData.onDelete ?? 'NoAction',
+            onUpdate: relationData.onUpdate,
+            relationName: relationData.name,
           };
+
+          if (defaultData.generator) {
+            graphQLField.defaultGenerator = defaultData.generator;
+          }
+          if (field.description?.value) {
+            graphQLField.description = field.description.value;
+          }
+          if (mapData) {
+            graphQLField.dbName = mapData;
+          }
+
+          // Parse validation directives (parse regex pattern from AST)
+          const emailDir = field.directives?.find(d => d.name.value === 'email');
+          const urlDir = field.directives?.find(d => d.name.value === 'url');
+          const regexDir = field.directives?.find(d => d.name.value === 'regex');
+          if (emailDir || urlDir || regexDir) {
+            graphQLField.validationRules = {};
+            if (emailDir) graphQLField.validationRules.email = true;
+            if (urlDir) graphQLField.validationRules.url = true;
+            if (regexDir) {
+              const patternArg = regexDir.arguments?.find(a => a.name.value === 'pattern');
+              if (patternArg?.value.kind === 'StringValue') {
+                graphQLField.validationRules.regex = patternArg.value.value;
+              }
+            }
+          }
 
           fields.push(graphQLField);
 
@@ -175,14 +217,81 @@ export class GraphQLParser {
         }
       }
 
-      this.models.set(modelName, {
+      // Parse compound directives (@@index, @@unique, @@id) from object-level directives
+      if (!isEmbedded && typeDef.directives) {
+        for (const dir of typeDef.directives) {
+          const dirName = dir.name.value;
+          if (dirName === 'compoundUnique' || dirName === 'compoundIndex' || dirName === 'compoundId') {
+            const fieldsArg = dir.arguments?.find(a => a.name.value === 'fields');
+            if (fieldsArg && fieldsArg.value.kind === 'ListValue') {
+              const fieldNames = fieldsArg.value.values
+                .filter(v => v.kind === 'StringValue')
+                .map(v => v.value);
+              if (fieldNames.length > 0) {
+                indexes.push({
+                  fields: fieldNames,
+                  unique: dirName === 'compoundUnique' || dirName === 'compoundId'
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // Parse @@fulltext directive (object-level)
+      let fulltextFields: string[] = [];
+      if (!isEmbedded && typeDef.directives) {
+        const fulltextDir = typeDef.directives.find(d => d.name.value === 'fulltext');
+        if (fulltextDir?.arguments) {
+          const fieldsArg = fulltextDir.arguments.find(a => a.name.value === 'fields');
+          if (fieldsArg?.value.kind === 'ListValue') {
+            fulltextFields = fieldsArg.value.values
+              .filter(v => v.kind === 'StringValue')
+              .map(v => v.value);
+          }
+        }
+      }
+
+      // Also collect field-level @fulltext directives
+      if (!isEmbedded) {
+        for (const field of typeDef.fields || []) {
+          if (field.directives?.some(d => d.name.value === 'fulltext')) {
+            if (!fulltextFields.includes(field.name.value)) {
+              fulltextFields.push(field.name.value);
+            }
+          }
+        }
+      }
+
+      // Extract @@map/@modelMap directive for collection name override
+      let collectionName = isEmbedded ? '' : this.toCollectionName(modelName);
+      if (!isEmbedded && typeDef.directives) {
+        const modelMapDir = typeDef.directives.find(d => d.name.value === 'modelMap');
+        if (modelMapDir?.arguments) {
+          const nameArg = modelMapDir.arguments.find(a => a.name.value === 'name');
+          if (nameArg?.value.kind === 'StringValue') {
+            collectionName = nameArg.value.value;
+          }
+        }
+      }
+
+      const modelData: GraphQLModel = {
         name: modelName,
         fields,
-        collectionName: isEmbedded ? '' : this.toCollectionName(modelName),
+        collectionName,
         relations: [],
         indexes,
         isEmbedded
-      });
+      };
+      if (fulltextFields.length > 0) {
+        modelData.fulltextFields = fulltextFields;
+      }
+
+      if (typeDef.description?.value) {
+        modelData.description = typeDef.description.value;
+      }
+
+      this.models.set(modelName, modelData);
     }
   }
 
@@ -217,16 +326,20 @@ export class GraphQLParser {
 
   private parseRelationDirective(fieldNode: FieldDefinitionNode): {
     field?: string;
+    name?: string;
     strategy?: 'populate' | 'lookup';
     index?: boolean;
     onDelete: 'Cascade' | 'SetNull' | 'NoAction';
+    onUpdate?: 'Cascade' | 'SetNull' | 'NoAction' | undefined;
   } {
-    const result: { field?: string; strategy?: 'populate' | 'lookup'; index?: boolean; onDelete: 'Cascade' | 'SetNull' | 'NoAction' } = { onDelete: 'NoAction' };
+    const result: { field?: string; name?: string; strategy?: 'populate' | 'lookup'; index?: boolean; onDelete: 'Cascade' | 'SetNull' | 'NoAction'; onUpdate?: 'Cascade' | 'SetNull' | 'NoAction' } = { onDelete: 'NoAction' };
     const relationDirective = fieldNode.directives?.find(d => d.name.value === 'relation');
     if (relationDirective?.arguments) {
       for (const arg of relationDirective.arguments) {
         if (arg.name.value === 'field' && arg.value.kind === 'StringValue') {
           result.field = arg.value.value;
+        } else if (arg.name.value === 'name' && arg.value.kind === 'StringValue') {
+          result.name = arg.value.value;
         } else if (arg.name.value === 'strategy' && arg.value.kind === 'StringValue') {
           if (arg.value.value === 'populate' || arg.value.value === 'lookup') {
             result.strategy = arg.value.value;
@@ -237,10 +350,44 @@ export class GraphQLParser {
           if (arg.value.value === 'Cascade' || arg.value.value === 'SetNull' || arg.value.value === 'NoAction') {
             result.onDelete = arg.value.value;
           }
+        } else if (arg.name.value === 'onUpdate' && arg.value.kind === 'StringValue') {
+          if (arg.value.value === 'Cascade' || arg.value.value === 'SetNull' || arg.value.value === 'NoAction') {
+            result.onUpdate = arg.value.value;
+          }
         }
       }
     }
     return result;
+  }
+
+  private parseDefaultDirective(fieldNode: FieldDefinitionNode): { value?: any; generator?: string } {
+    const result: { value?: any; generator?: string } = {};
+    const defaultDirective = fieldNode.directives?.find(d => d.name.value === 'default');
+    if (defaultDirective?.arguments) {
+      for (const arg of defaultDirective.arguments) {
+        if (arg.name.value === 'value' && arg.value.kind === 'StringValue') {
+          try {
+            result.value = JSON.parse(arg.value.value);
+          } catch {
+            result.value = arg.value.value;
+          }
+        } else if (arg.name.value === 'generator' && arg.value.kind === 'StringValue') {
+          result.generator = arg.value.value;
+        }
+      }
+    }
+    return result;
+  }
+
+  private parseMapDirective(fieldNode: FieldDefinitionNode): string | undefined {
+    const mapDirective = fieldNode.directives?.find(d => d.name.value === 'map');
+    if (mapDirective?.arguments) {
+      const nameArg = mapDirective.arguments.find(a => a.name.value === 'name');
+      if (nameArg?.value.kind === 'StringValue') {
+        return nameArg.value.value;
+      }
+    }
+    return undefined;
   }
 
   private isModelType(typeName: string): boolean {
@@ -429,7 +576,9 @@ export class GraphQLParser {
       strategy: field.relationStrategy ?? defaultStrategy,
       index: field.relationIndex ?? true,
       isForeignKeyArray,
-      onDelete: field.onDelete ?? 'NoAction'
+      onDelete: field.onDelete ?? 'NoAction',
+      onUpdate: field.onUpdate,
+      relationName: field.relationName,
     };
 
     return relation;

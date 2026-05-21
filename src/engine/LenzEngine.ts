@@ -4,10 +4,9 @@ import { promises as fs, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import chalk from 'chalk';
 import {
-  SchemaValidationError,
-  SchemaParseError,
   CodeGenerationError,
-  ConfigurationError
+  ConfigurationError,
+  isLenzError
 } from '../errors/index.js';
 
 export interface GenerateOptions {
@@ -80,11 +79,7 @@ export class LenzEngine {
     } catch (error) {
       console.log(chalk.red('❌ Generation failed:'));
 
-      // Check if it's already a LenzError
-      const isLenzError = error instanceof SchemaValidationError || error instanceof SchemaParseError ||
-          error instanceof CodeGenerationError || error instanceof ConfigurationError;
-
-      if (isLenzError) {
+      if (isLenzError(error)) {
         console.log(chalk.red(`   ${error.code}: ${error.message}`));
         if (error.details) {
           console.log(chalk.gray('   Details:', JSON.stringify(error.details, null, 2)));
