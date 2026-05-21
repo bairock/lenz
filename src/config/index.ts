@@ -24,8 +24,6 @@ export interface LenzConfig {
   };
   /** Logging levels */
   log?: ('query' | 'info' | 'warn' | 'error')[];
-  /** Auto-create collections */
-  autoCreateCollections?: boolean;
   /** Connection pool size */
   maxPoolSize?: number;
   /** Connection timeout */
@@ -107,7 +105,6 @@ export const defaultConfig: LenzConfig = {
     }
   },
   log: ['query', 'error', 'warn'],
-  autoCreateCollections: true,
   maxPoolSize: 10,
   connectTimeoutMS: 10000,
   socketTimeoutMS: 45000

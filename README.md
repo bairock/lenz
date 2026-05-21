@@ -496,11 +496,9 @@ export default defineConfig({
   generate: {
     client: {
       output: '../generated/lenz/client',
-      generator: 'lenz-client-js',
     },
   },
   log: ['query', 'info', 'warn', 'error'] as const,
-  autoCreateCollections: true,
 })
 ```
 
@@ -521,11 +519,9 @@ export default {
   generate: {
     client: {
       output: '../generated/lenz/client',
-      generator: 'lenz-client-js',
     },
   },
   log: ['query', 'info', 'warn', 'error'],
-  autoCreateCollections: true,
 };
 ```
 

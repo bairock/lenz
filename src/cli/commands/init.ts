@@ -51,7 +51,6 @@ export default defineConfig({
     },
   },
   log: ['query', 'info', 'warn', 'error'] as const,
-  autoCreateCollections: true,
 })`;
 
 const DEFAULT_CONFIG_JS = `import 'dotenv/config'
@@ -68,7 +67,6 @@ export default defineConfig({
     },
   },
   log: ['query', 'info', 'warn', 'error'],
-  autoCreateCollections: true,
 });`;
 
 

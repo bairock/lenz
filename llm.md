@@ -62,7 +62,6 @@ export default defineConfig({
     },
   },
   log: ['query', 'info', 'warn', 'error'] as const,
-  autoCreateCollections: true,
   maxPoolSize: 10,
   connectTimeoutMS: 10000,
   socketTimeoutMS: 45000,
